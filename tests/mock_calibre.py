@@ -32,6 +32,7 @@ class State:
         self.db = fresh_db()
         self.seen = []
         self.jobs = {}          # job_id -> dict
+        self.saved = {}         # saved search name -> expression
         self.next_job = 100
         self.polls_before_done = 1   # kolikrat vratit running=True
 
@@ -188,6 +189,24 @@ def make_handler(state):
                 state.db[lib][nid] = _book(nid, m.group(3), ["EPUB"])
                 state.seen.append(("ADD", lib, nid, len(raw)))
                 return self._send(200, {"book_id": nid, "title": m.group(3)})
+            m = re.match(r"^/cdb/cmd/saved_searches(?:/(.+))?$", p)
+            if m:
+                lib = m.group(1) if m.group(1) in LIBS else DEFAULT
+                argv = json.loads(raw) if raw else ["list"]
+                action = argv[0]
+                if action == "list":
+                    self._send(200, dict(state.saved))
+                elif action == "add":
+                    state.saved[argv[1]] = argv[2]
+                    state.seen.append(("SS_ADD", lib, argv[1], argv[2]))
+                    self._send(200, None)
+                elif action == "remove":
+                    state.saved.pop(argv[1], None)
+                    state.seen.append(("SS_REMOVE", lib, argv[1]))
+                    self._send(200, None)
+                else:
+                    self._send(400, {"error": "bad action"})
+                return
             m = re.match(r"^/cdb/copy-to-library/([^/]+)(?:/(.+))?$", p)
             if m:
                 target = m.group(1)

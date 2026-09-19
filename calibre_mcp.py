@@ -512,6 +512,51 @@ def copy_to_library(book_ids: list, target_library: str,
                       ensure_ascii=False, indent=2)
 
 
+# ----------------------------------------------------------- saved searches
+
+@mcp.tool()
+def list_saved_searches(library: str = "") -> str:
+    """List the library's saved searches (name -> search expression)."""
+    res = _json("POST", "/cdb/cmd/saved_searches" + _libseg(library),
+                json=["list"])
+    return json.dumps(res, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def create_saved_search(name: str, expression: str,
+                        library: str = "") -> str:
+    """Create a saved search, e.g. name="School reading",
+    expression="tags:school".
+
+    This is as close to a Virtual Library as the API reaches: calibre keeps
+    virtual libraries in the library preferences and exposes no endpoint for
+    them. A saved search does show up in the GUI, and a Virtual Library can
+    be built from it in two clicks: Virtual library -> Create, then pick the
+    saved search."""
+    _guard_write()
+    if not name.strip() or not expression.strip():
+        raise CalibreError("Both a name and a search expression are required.")
+    _json("POST", "/cdb/cmd/saved_searches" + _libseg(library),
+          json=["add", name, expression])
+    return json.dumps({"ok": True, "name": name, "expression": expression,
+                       "library": _resolve(library) or "(default)",
+                       "note": "Saved search created. Turn it into a Virtual "
+                               "Library in the calibre GUI: Virtual library "
+                               "-> Create library, then choose this search."},
+                      ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def remove_saved_search(name: str, library: str = "") -> str:
+    """Delete a saved search by name. Does not touch any book."""
+    _guard_write()
+    _json("POST", "/cdb/cmd/saved_searches" + _libseg(library),
+          json=["remove", name])
+    return json.dumps({"ok": True, "removed": name,
+                       "library": _resolve(library) or "(default)"},
+                      ensure_ascii=False)
+
+
 # -------------------------------------------------------------- conversion
 
 @mcp.tool()

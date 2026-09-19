@@ -195,3 +195,36 @@ def test_all_is_refused_where_a_single_book_is_meant(srv):
     with pytest.raises(m.CalibreError) as e:
         m.get_book(1, library="all")
     assert "one book" in str(e.value)
+
+
+# --------------------------------------------------------- saved searches
+
+def test_create_and_list_saved_search(srv):
+    m, state = srv
+    m.create_saved_search("School reading", "tags:school")
+    assert [s for s in state.seen if s[0] == "SS_ADD"][-1][2:4] == (
+        "School reading", "tags:school")
+    assert json.loads(m.list_saved_searches())["School reading"] == "tags:school"
+
+
+def test_saved_search_needs_name_and_expression(srv):
+    m, _ = srv
+    with pytest.raises(m.CalibreError):
+        m.create_saved_search("", "tags:school")
+
+
+def test_remove_saved_search(srv):
+    m, state = srv
+    m.create_saved_search("tmp", "tags:x")
+    m.remove_saved_search("tmp")
+    assert "tmp" not in json.loads(m.list_saved_searches())
+
+
+def test_readonly_blocks_saved_search(srv):
+    m, _ = srv
+    m.READONLY = True
+    try:
+        with pytest.raises(m.CalibreError):
+            m.create_saved_search("x", "tags:y")
+    finally:
+        m.READONLY = False
