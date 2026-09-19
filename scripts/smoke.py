@@ -3,15 +3,31 @@
 
 Speaks raw JSON-RPC so it needs nothing but the standard library.
 
-    python3 scripts/smoke.py                       # default http://127.0.0.1:8765/mcp
-    python3 scripts/smoke.py http://host:8765/mcp
+    python3 scripts/smoke.py                       # read-only checks
+    python3 scripts/smoke.py --convert 896:azw3    # also convert one book
+    python3 scripts/smoke.py --url http://host:8765/mcp
+
+Without --convert nothing is modified. With it, the named book gains the
+named format (the calibre server adds it itself once the job finishes).
 """
 import json
 import sys
 import urllib.error
 import urllib.request
 
-URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/mcp"
+args = sys.argv[1:]
+CONVERT = None
+URL = "http://127.0.0.1:8765/mcp"
+i = 0
+while i < len(args):
+    if args[i] == "--convert" and i + 1 < len(args):
+        CONVERT = args[i + 1]; i += 2
+    elif args[i] == "--url" and i + 1 < len(args):
+        URL = args[i + 1]; i += 2
+    elif not args[i].startswith("--"):
+        URL = args[i]; i += 1
+    else:
+        raise SystemExit("unknown argument: %s" % args[i])
 SESSION = None
 _id = 0
 
@@ -91,4 +107,26 @@ try:
 except Exception as e:
     print("skipped:", e)
 
-print("\nDone. Read-only tools only — nothing was modified.")
+if not CONVERT:
+    print("\nDone. Read-only tools only — nothing was modified.")
+    raise SystemExit(0)
+
+try:
+    bid_s, fmt = CONVERT.split(":", 1)
+    bid = int(bid_s)
+except ValueError:
+    raise SystemExit("--convert expects BOOK_ID:FORMAT, e.g. 896:azw3")
+
+head("6. formats BEFORE conversion")
+before = json.loads(call("get_book", book_id=bid))
+print(bid, before.get("title"), "->", before.get("formats"))
+
+head("7. convert %d to %s  (runs on the calibre server)" % (bid, fmt))
+print(call("convert_book", book_id=bid, to_format=fmt))
+
+head("8. formats AFTER conversion")
+after = json.loads(call("get_book", book_id=bid))
+print(bid, after.get("title"), "->", after.get("formats"))
+gained = set(map(str.lower, after.get("formats") or [])) - set(
+    map(str.lower, before.get("formats") or []))
+print("\ngained:", sorted(gained) or "NOTHING - something went wrong")
