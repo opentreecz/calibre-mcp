@@ -68,7 +68,19 @@ VERIFY = os.environ.get("CALIBRE_VERIFY_TLS", "1") != "0"
 mcp = _MCPServer("calibre-api")
 
 
-class CalibreError(RuntimeError):
+# SDK predava klientovi text jen u "ocekavane" chyby, tedy ToolError.
+# Bezna vyjimka se zamaskuje na "Error executing tool <jmeno>" a duvod
+# se ke klientovi vubec nedostane. Proto od ToolError dedime.
+try:
+    from mcp.server.mcpserver.exceptions import ToolError as _ToolError  # mcp >= 2
+except ModuleNotFoundError:  # pragma: no cover
+    try:
+        from mcp.server.fastmcp.exceptions import ToolError as _ToolError  # mcp < 2
+    except ModuleNotFoundError:
+        _ToolError = RuntimeError
+
+
+class CalibreError(_ToolError):
     pass
 
 

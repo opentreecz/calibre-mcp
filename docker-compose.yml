@@ -18,7 +18,7 @@ services:
       # CALIBRE_AUTH: "digest"        # digest (výchozí) | basic | none
 
       # Pro první ostrý běh doporučeno: zakáže všechny zápisové nástroje.
-      CALIBRE_READONLY: "1"
+      CALIBRE_READONLY: "0"
 
       CALIBRE_TIMEOUT: "120"
 
