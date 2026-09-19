@@ -308,6 +308,36 @@ An unknown id returns the list of valid ones instead of a bare 404.
 
 ---
 
+## Using the tags from Calibre-Web
+
+Calibre-Web reads the same `metadata.db`, so anything tagged through this
+server shows up there — but a *Shelf* and a *tag* are different things and
+only one of them is reachable from here.
+
+**Tags need no setup.** Calibre-Web lists tags under **Categories**
+(`/category`). A tag applied here becomes a browsable category there
+immediately, which already behaves like a virtual shelf.
+
+**Shelves cannot be created from here.** Calibre-Web keeps shelves in its
+*own* database (`app.db`), not in `metadata.db`. This server only talks to
+calibre's Content Server, so it cannot reach them. Building one is a few
+clicks:
+
+1. Search `tags:maturita` in Calibre-Web
+2. **Add to shelf** — the `/shelf/massadd` route adds the whole result set
+   of the last search, not one book at a time
+3. Mark the shelf public if other accounts should see it
+
+**Calibre-Web caches the calibre database.** Tags written here may not
+appear until it re-reads `metadata.db`. There is a `/reconnect` route, but
+it only works when Calibre-Web was started with the reconnect option
+enabled (`-r`); otherwise restart the container.
+
+> **Two writers, one SQLite file.** The calibre Content Server and
+> Calibre-Web can both write `metadata.db`. That is the usual way to lose a
+> library. Give Calibre-Web read-only access if you can, or at least avoid
+> editing metadata in both at once.
+
 ## Tools
 
 | Tool | Purpose |
