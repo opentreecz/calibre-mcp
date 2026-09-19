@@ -21,7 +21,11 @@ import urllib.request
 
 # (number, title as it appears in the list, author surname used for matching)
 READING_LIST = [
-    (1, "Genesis", "bible"), (2, "Dekameron", "boccaccio"),
+    # A 4th element lists alternative titles: the work counts as present
+    # if ANY of them matches. Genesis is not a standalone book in most
+    # editions — it sits inside an Old Testament volume.
+    (1, "Genesis", "bible", ["stary zakon", "bible"]),
+    (2, "Dekameron", "boccaccio"),
     (3, "Romeo a Julie", "shakespeare"), (4, "Zkrocení zlé ženy", "shakespeare"),
     (5, "Lakomec", "moliere"), (6, "Robinson Crusoe", "defoe"),
     (7, "Utrpení mladého Werthera", "goethe"),
@@ -186,6 +190,32 @@ if SHOW_TAGS:
           % (SHOW_TAGS, len(only)))
     for b in sorted(only, key=lambda x: x["id"])[:40]:
         print("  id=%-5s %s" % (b["id"], (b.get("title") or "")[:52]))
+
+    # Anything tagged that the matcher does not recognise is either a
+    # manual addition or a blind spot in the matching — worth seeing.
+    whole = json.loads(call("search_books", query="", limit=100000,
+                            library=LIBRARY)).get("books") or []
+    by_id = {b["id"]: b for b in whole}
+    for b in by_id.values():
+        b["_t"], b["_a"] = fold(b.get("title")), fold(" ".join(b.get("authors") or []))
+    matched = set()
+    for entry in READING_LIST:
+        author = entry[2]
+        variants = [entry[1]] + list(entry[3] if len(entry) > 3 else [])
+        for b in by_id.values():
+            if fold(author).strip() not in b["_a"]:
+                continue
+            for v in variants:
+                tk = tokens(v)
+                if (tk and title_matches(tk, b["_t"])) or \
+                   (not tk and fold(v).strip() in b["_t"]):
+                    matched.add(b["id"]); break
+    stray = [b for b in books if b["id"] not in matched]
+    print("\ntagged but NOT matched by the list (%d) — manual additions, "
+          "or gaps in the matching:" % len(stray))
+    for b in sorted(stray, key=lambda x: x["id"]):
+        print("  id=%-5s %-40s %s" % (b["id"], (b.get("title") or "")[:40],
+                                      ", ".join(b.get("authors") or [])))
     raise SystemExit(0)
 
 # One pass over the whole library, then match locally. Far more reliable
@@ -202,16 +232,19 @@ for b in shelf:
     b["_a"] = fold(" ".join(b.get("authors") or []))
 
 found, missing = [], []
-for num, title, author in READING_LIST:
-    toks = tokens(title)
+for entry in READING_LIST:
+    num, title, author = entry[0], entry[1], entry[2]
+    variants = [title] + list(entry[3] if len(entry) > 3 else [])
     hits = []
     for b in shelf:
         if fold(author).strip() not in b["_a"]:
             continue
-        if toks and title_matches(toks, b["_t"]):
-            hits.append(b)
-        elif not toks and fold(title).strip() in b["_t"]:
-            hits.append(b)
+        for v in variants:
+            toks = tokens(v)
+            if (toks and title_matches(toks, b["_t"])) or \
+               (not toks and fold(v).strip() in b["_t"]):
+                hits.append(b)
+                break
     if hits:
         hits = sorted(hits, key=lambda x: len(x["_t"]))
         found.append((num, title, hits))
