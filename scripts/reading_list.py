@@ -7,6 +7,7 @@ but the standard library.
     python3 scripts/reading_list.py
     python3 scripts/reading_list.py --tag maturita
     python3 scripts/reading_list.py --tag maturita --saved-search "Literatura k maturite"
+    python3 scripts/reading_list.py --show-tags maturita
 
 Without --tag nothing is modified. --tag adds that tag to every book found
 (existing tags are preserved). --saved-search then creates a saved search
@@ -71,6 +72,7 @@ URL = "http://127.0.0.1:8765/mcp"
 LIBRARY = "Calibre_Library"
 TAG = None
 SAVED_SEARCH = None
+SHOW_TAGS = None
 
 args = sys.argv[1:]
 i = 0
@@ -83,6 +85,8 @@ while i < len(args):
         TAG = args[i + 1]; i += 2
     elif args[i] == "--saved-search" and i + 1 < len(args):
         SAVED_SEARCH = args[i + 1]; i += 2
+    elif args[i] == "--show-tags" and i + 1 < len(args):
+        SHOW_TAGS = args[i + 1]; i += 2
     else:
         raise SystemExit("unknown argument: %s" % args[i])
 
@@ -162,6 +166,27 @@ def tokens(s):
 rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                    "clientInfo": {"name": "reading-list", "version": "1"}})
 rpc("notifications/initialized", notify=True)
+
+if SHOW_TAGS:
+    # Read-only audit: did adding the tag cost any book its other tags?
+    res = json.loads(call("search_books", query="tags:%s" % SHOW_TAGS,
+                          limit=100000, library=LIBRARY))
+    books = res.get("books") or []
+    only, extra = [], []
+    for b in books:
+        tags = b.get("tags") or []
+        (only if [t for t in tags if t != SHOW_TAGS] == [] else extra).append(b)
+    print("books tagged %r: %d\n" % (SHOW_TAGS, len(books)))
+    print("with other tags as well (%d) — proof nothing was overwritten:"
+          % len(extra))
+    for b in sorted(extra, key=lambda x: x["id"])[:40]:
+        print("  id=%-5s %-38s %s" % (b["id"], (b.get("title") or "")[:38],
+                                      ", ".join(b.get("tags") or [])))
+    print("\nwith %r only (%d) — these simply had no tags before:"
+          % (SHOW_TAGS, len(only)))
+    for b in sorted(only, key=lambda x: x["id"])[:40]:
+        print("  id=%-5s %s" % (b["id"], (b.get("title") or "")[:52]))
+    raise SystemExit(0)
 
 # One pass over the whole library, then match locally. Far more reliable
 # than 88 calibre queries whose syntax has to survive quoting and accents.

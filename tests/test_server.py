@@ -228,3 +228,38 @@ def test_readonly_blocks_saved_search(srv):
             m.create_saved_search("x", "tags:y")
     finally:
         m.READONLY = False
+
+
+# ------------------------------------------- tags must be merged, not lost
+
+def test_set_metadata_replaces_the_tag_list(srv):
+    """calibre's set-fields REPLACES the list — this is why any caller
+    adding a tag has to merge client-side. Pinning the behaviour here so
+    the reading-list script's merge is not mistaken for belt and braces."""
+    m, state = srv
+    assert state.db["Calibre_Library"][1]["tags"] == ["test"]
+    m.set_metadata(1, {"tags": ["maturita"]})
+    assert state.db["Calibre_Library"][1]["tags"] == ["maturita"]
+
+
+def test_merging_keeps_existing_tags(srv):
+    """What the script actually does: read, append, write back."""
+    m, state = srv
+    before = json.loads(m.get_book(1))["tags"]
+    assert "test" in before
+    m.set_metadata(1, {"tags": list(before) + ["maturita"]})
+    after = json.loads(m.get_book(1))["tags"]
+    assert after == ["test", "maturita"]
+    assert "test" in after, "pre-existing tag was lost"
+
+
+def test_reading_list_script_merges_rather_than_overwrites():
+    """Read the script and assert it appends to the existing list instead
+    of assigning a bare [TAG]."""
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "scripts" / "reading_list.py"
+    text = src.read_text(encoding="utf-8")
+    assert 'tags = list(b.get("tags") or [])' in text
+    assert "tags.append(TAG)" in text
+    assert 'fields={"tags": tags}' in text
+    assert 'fields={"tags": [TAG]}' not in text
