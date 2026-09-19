@@ -321,3 +321,12 @@ def test_pair_by_author_does_not_mutate_its_input():
     stray = [{"id": 321, "title": "Hory a staletí", "authors": ["Ivan Olbracht"]}]
     ns["pair_by_author"]([(55, "Golet v údolí", "olbracht", [])], stray)
     assert len(stray) == 1
+
+
+def test_is_drm_spots_the_tag_whatever_its_case():
+    ns = _reading_list_prefix()
+    is_drm = ns["is_drm"]
+    assert is_drm({"tags": ["maturita", "DRM"]})
+    assert is_drm({"tags": [" drm "]})
+    assert not is_drm({"tags": ["maturita"]})
+    assert not is_drm({})

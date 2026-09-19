@@ -311,6 +311,10 @@ Two things worth copying:
   Two candidates for one author stay unresolved rather than being guessed at,
   and anything left over is printed under **TAGGED BUT UNRECOGNISED** so you
   can see what the matcher missed.
+* **A `DRM` tag means owned but unreadable.** Books saved off a Kindle stay
+  locked on a PC. They are still counted as present, but the report adds a
+  `READABLE ON A PC` line and lists them under **DRM-LOCKED**, so a work that
+  exists only as a locked file is not mistaken for one you can actually read.
 
 ---
 

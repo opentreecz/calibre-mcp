@@ -167,6 +167,17 @@ def tokens(s):
     return [w for w in fold(s).split() if len(w) >= 3]
 
 
+DRM_TAG = "drm"
+
+
+def is_drm(book):
+    """A book tagged DRM is in the library but cannot be opened on a PC —
+    typically a title saved off a Kindle. It counts as owned, never as
+    readable, so the report keeps the two apart."""
+    return any((t or "").strip().lower() == DRM_TAG
+               for t in (book.get("tags") or []))
+
+
 def pair_by_author(missing, stray):
     """A book tagged by hand is a statement that the work IS in the library,
     even when its title in calibre looks nothing like the one on the list
@@ -289,10 +300,19 @@ if TAG:
               if TAG in (b.get("tags") or []) and b["id"] not in matched_ids]
     reconciled, missing, stray = pair_by_author(missing, tagged)
 
+# Every copy of the work is DRM-locked -> owned, but not readable here.
+locked = [(num, title, hits) for num, title, hits in found
+          if hits and all(is_drm(b) for b in hits)]
+locked += [(num, title, [b]) for num, title, b in reconciled if is_drm(b)]
+
 print("\n" + "=" * 74)
 print("IN THE LIBRARY: %d of %d works   (%d books, multi-volume counted)"
       % (len(found) + len(reconciled), len(READING_LIST),
          sum(len(h) for _, _, h in found) + len(reconciled)))
+if locked:
+    print("READABLE ON A PC: %d of %d   (%d only as a DRM-locked copy)"
+          % (len(found) + len(reconciled) - len(locked), len(READING_LIST),
+             len(locked)))
 print("=" * 74)
 print("\nMISSING (%d):" % len(missing))
 for num, title, author, others in missing:
@@ -308,6 +328,15 @@ if reconciled:
         print("  %2d  %-34s id=%-5s %-34s %s"
               % (num, title[:34], b["id"], (b.get("title") or "")[:34],
                  ", ".join(b.get("authors") or [])))
+
+if locked:
+    print("\nDRM-LOCKED (%d) — in the library, but the file cannot be opened "
+          "on a PC; a second, DRM-free copy is what is missing:" % len(locked))
+    for num, title, hits in sorted(locked):
+        for b in hits:
+            print("  %2d  %-34s id=%-5s %-30s %s"
+                  % (num, title[:34], b["id"], (b.get("title") or "")[:30],
+                     ",".join(b.get("formats") or [])))
 
 if stray:
     print("\nTAGGED BUT UNRECOGNISED (%d) — either not on the list, or a gap "
