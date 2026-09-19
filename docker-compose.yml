@@ -12,13 +12,14 @@ services:
       CALIBRE_URL: "http://host.docker.internal:8080"
       # Výchozí knihovna; každý nástroj ji umí přebít parametrem `library`.
       CALIBRE_LIBRARY_ID: "Calibre_Library"
-      # Odkomentuj, když má server zapnutou autentizaci:
-      # CALIBRE_USER: "lukas"
-      # CALIBRE_PASSWORD: "heslo"
-      # CALIBRE_AUTH: "digest"        # digest (výchozí) | basic | none
+      # Přihlášení se bere z .env (viz .env.example), ne odsud —
+      # ať se heslo nedostane do gitu.
+      CALIBRE_USER: "${CALIBRE_USER:-}"
+      CALIBRE_PASSWORD: "${CALIBRE_PASSWORD:-}"
+      CALIBRE_AUTH: "${CALIBRE_AUTH:-digest}"   # digest | basic | none
 
-      # Pro první ostrý běh doporučeno: zakáže všechny zápisové nástroje.
-      CALIBRE_READONLY: "0"
+      # Zápis se přepíná v .env. Výchozí 1 = jen pro čtení.
+      CALIBRE_READONLY: "${CALIBRE_READONLY:-1}"
 
       CALIBRE_TIMEOUT: "120"
 

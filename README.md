@@ -50,7 +50,7 @@ python3 -m venv .venv
 |---|---|
 | `CALIBRE_URL` | **required** — e.g. `http://localhost:8080` |
 | `CALIBRE_LIBRARY_ID` | default library; override per call with `library` |
-| `CALIBRE_USER` / `CALIBRE_PASSWORD` | if the server requires auth |
+| `CALIBRE_USER` / `CALIBRE_PASSWORD` | content server account (see the Docker note) |
 | `CALIBRE_AUTH` | `digest` (default) \| `basic` \| `none` |
 | `CALIBRE_READONLY` | `1` disables all write tools |
 | `CALIBRE_TIMEOUT` | HTTP timeout in seconds (default 120) |
@@ -107,10 +107,27 @@ which a long-running service cannot provide.
 not work on your system, switch the service to `network_mode: host` — the
 file has it prepared and commented out.
 
-One catch: calibre must be listening on an interface the container can
-reach. If `calibre-server` is bound to `127.0.0.1` only, the container will
-not get through — start it with `--listen-on 0.0.0.0`, or use
-`network_mode: host`.
+Two catches, both found the hard way:
+
+**A real account is required.** calibre's "allow unauthenticated local
+connections to make changes" does **not** apply to the container. The
+container reaches calibre from the Docker bridge network (172.x.x.x), which
+calibre does not count as a local connection, so writes are refused however
+that option is set. Create a user with write permission
+(`calibre-server --manage-users`, or Preferences → Sharing over the net →
+User accounts) and put it in `.env`. Reads work either way, so the symptom
+is that everything looks fine until the first write.
+
+**calibre must listen on a reachable interface.** If `calibre-server` is
+bound to `127.0.0.1` only, the container will not get through — start it
+with `--listen-on 0.0.0.0`, or use `network_mode: host`.
+
+Credentials live in `.env`, which is gitignored:
+
+```bash
+cp .env.example .env    # then fill in CALIBRE_USER / CALIBRE_PASSWORD
+docker compose up -d
+```
 
 Point your MCP client at the HTTP endpoint:
 

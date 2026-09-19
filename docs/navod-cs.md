@@ -103,9 +103,16 @@ systemctl --user enable --now calibre-server
 > **Nikdy obojí najednou.** Buď server v GUI, nebo samostatný — ne oba na
 > stejnou knihovnu.
 
-> `--enable-local-write` povoluje zápis bez přihlášení. Nechte server
-> poslouchat na localhostu. Když ho vystavujete do sítě, použijte místo
-> toho uživatele s heslem (`--enable-auth`, `--manage-users`).
+> `--enable-local-write` povoluje zápis bez přihlášení, ale **platí jen pro
+> spojení, která Calibre považuje za místní**. Kontejner přichází z bridge
+> sítě Dockeru (172.x.x.x), a to místní spojení není — zápis proto odmítne
+> bez ohledu na to, jak je volba nastavená. Ověřeno experimentálně.
+>
+> Pro Docker tedy vždycky **založte uživatele s právem zápisu**
+> (`calibre-server --manage-users`, nebo v GUI Předvolby → Sdílení po síti →
+> Uživatelské účty) a přihlášení dejte do `.env`.
+>
+> Čtení funguje i bez účtu, takže se to projeví až u prvního zápisu.
 
 ### Ověření, že API odpovídá
 
