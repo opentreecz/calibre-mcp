@@ -129,39 +129,69 @@ def call(tool, **a):
 
 
 def fold(s):
-    """Lowercase and strip diacritics, so 'Čapek' matches 'capek'."""
+    """Lowercase, strip diacritics and punctuation: 'Čapek' -> 'capek'."""
     s = unicodedata.normalize("NFD", str(s or ""))
-    return "".join(c for c in s if not unicodedata.combining(c)).lower()
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
+    s = "".join(c if c.isalnum() or c.isspace() else " " for c in s)
+    return " ".join(s.split())   # collapse runs of spaces, so that
+                                 # "R.U.R." and "R. U. R." both fold to "r u r"
+
+
+def tokens(s):
+    """Significant words, so a subtitle or an extra preposition cannot
+    break the match: 'V zamku a podzamci' still matches
+    'V zamku a v podzamci', and 'Kytice' matches
+    'Kytice z povesti narodnich'."""
+    return [w for w in fold(s).split() if len(w) >= 3]
 
 
 rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                    "clientInfo": {"name": "reading-list", "version": "1"}})
 rpc("notifications/initialized", notify=True)
-print("library: %s   list: %d works\n" % (LIBRARY, len(READING_LIST)))
+
+# One pass over the whole library, then match locally. Far more reliable
+# than 88 calibre queries whose syntax has to survive quoting and accents.
+print("fetching %s ..." % LIBRARY, flush=True)
+lib = json.loads(call("search_books", query="", limit=100000,
+                      library=LIBRARY))
+shelf = lib.get("books") or []
+print("library: %s   %d books   list: %d works\n"
+      % (LIBRARY, len(shelf), len(READING_LIST)))
+
+for b in shelf:
+    b["_t"] = fold(b.get("title"))
+    b["_a"] = fold(" ".join(b.get("authors") or []))
 
 found, missing = [], []
 for num, title, author in READING_LIST:
-    try:
-        res = json.loads(call("search_books", query='title:"%s"' % title,
-                              limit=25, library=LIBRARY))
-    except RuntimeError as e:
-        print("  ! %2d %-42s search failed: %s" % (num, title, e)); continue
-    hits = [b for b in res.get("books") or []
-            if fold(author) in fold(" ".join(b.get("authors") or []))]
+    toks = tokens(title)
+    hits = []
+    for b in shelf:
+        if fold(author).strip() not in b["_a"]:
+            continue
+        if toks and all(t in b["_t"] for t in toks):
+            hits.append(b)
+        elif not toks and fold(title).strip() in b["_t"]:
+            hits.append(b)
     if hits:
-        b = hits[0]
+        b = sorted(hits, key=lambda x: len(x["_t"]))[0]
         found.append((num, title, b))
-        print("  ok %2d  %-42s id=%-5s %s" % (num, title, b["id"],
-                                              ",".join(b.get("formats") or [])))
+        print("  ok %2d  %-42s id=%-5s %-28s %s"
+              % (num, title, b["id"], (b.get("title") or "")[:28],
+                 ",".join(b.get("formats") or [])))
     else:
-        missing.append((num, title, author))
+        others = [b for b in shelf if fold(author).strip() in b["_a"]]
+        missing.append((num, title, author, others))
 
-print("\n" + "=" * 70)
+print("\n" + "=" * 74)
 print("IN THE LIBRARY: %d of %d" % (len(found), len(READING_LIST)))
-print("=" * 70)
+print("=" * 74)
 print("\nMISSING (%d):" % len(missing))
-for num, title, author in missing:
-    print("  %2d  %-46s %s" % (num, title, author))
+for num, title, author, others in missing:
+    print("  %2d  %-44s %s" % (num, title, author))
+    for o in others[:3]:
+        print("        same author in library: id=%-5s %s"
+              % (o["id"], (o.get("title") or "")[:52]))
 
 if TAG:
     print("\n" + "=" * 70)
