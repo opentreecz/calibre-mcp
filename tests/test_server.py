@@ -263,3 +263,61 @@ def test_reading_list_script_merges_rather_than_overwrites():
     assert "tags.append(TAG)" in text
     assert 'fields={"tags": tags}' in text
     assert 'fields={"tags": [TAG]}' not in text
+
+
+def _reading_list_prefix():
+    """Exec the pure top half of scripts/reading_list.py (everything above
+    the first network call) so its helpers can be tested on their own."""
+    import sys
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "scripts" / "reading_list.py"
+    text = src.read_text(encoding="utf-8")
+    head = text.split('rpc("initialize"')[0]
+    ns = {"__name__": "reading_list_prefix"}
+    argv = sys.argv
+    sys.argv = ["reading_list.py"]          # the prefix parses sys.argv
+    try:
+        exec(compile(head, str(src), "exec"), ns)
+    finally:
+        sys.argv = argv
+    return ns
+
+
+def test_pair_by_author_trusts_a_hand_added_tag():
+    """Golet v udoli sits in calibre under a title the matcher cannot see,
+    but it carries the tag — one Olbracht book, one missing Olbracht work,
+    so it counts as present."""
+    ns = _reading_list_prefix()
+    missing = [(55, "Golet v údolí", "olbracht", [])]
+    stray = [{"id": 321, "title": "Hory a staletí", "authors": ["Ivan Olbracht"]}]
+    paired, rest, leftover = ns["pair_by_author"](missing, stray)
+    assert [(p[0], p[2]["id"]) for p in paired] == [(55, 321)]
+    assert rest == [] and leftover == []
+
+
+def test_pair_by_author_refuses_to_guess_between_two_candidates():
+    ns = _reading_list_prefix()
+    missing = [(55, "Golet v údolí", "olbracht", [])]
+    stray = [{"id": 1, "title": "A", "authors": ["Ivan Olbracht"]},
+             {"id": 2, "title": "B", "authors": ["Ivan Olbracht"]}]
+    paired, rest, leftover = ns["pair_by_author"](missing, stray)
+    assert paired == []
+    assert [m[0] for m in rest] == [55]
+    assert len(leftover) == 2
+
+
+def test_pair_by_author_ignores_a_different_author():
+    ns = _reading_list_prefix()
+    missing = [(55, "Golet v údolí", "olbracht", [])]
+    stray = [{"id": 9, "title": "Saturnin", "authors": ["Zdeněk Jirotka"]}]
+    paired, rest, leftover = ns["pair_by_author"](missing, stray)
+    assert paired == []
+    assert [m[0] for m in rest] == [55]
+    assert [b["id"] for b in leftover] == [9]
+
+
+def test_pair_by_author_does_not_mutate_its_input():
+    ns = _reading_list_prefix()
+    stray = [{"id": 321, "title": "Hory a staletí", "authors": ["Ivan Olbracht"]}]
+    ns["pair_by_author"]([(55, "Golet v údolí", "olbracht", [])], stray)
+    assert len(stray) == 1

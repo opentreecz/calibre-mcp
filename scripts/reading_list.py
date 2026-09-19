@@ -167,6 +167,29 @@ def tokens(s):
     return [w for w in fold(s).split() if len(w) >= 3]
 
 
+def pair_by_author(missing, stray):
+    """A book tagged by hand is a statement that the work IS in the library,
+    even when its title in calibre looks nothing like the one on the list
+    (other edition, omnibus volume, subtitle). Trust the tag: pair each
+    leftover tagged book with the one missing work by the same author.
+
+    Only a 1:1 pairing counts — two candidates for the same author stay
+    unresolved rather than being guessed at. Returns
+    (paired, still_missing, leftover) and does not modify its arguments.
+    """
+    stray = list(stray)
+    paired, rest = [], []
+    for num, title, author, others in missing:
+        a = fold(author).strip()
+        cands = [b for b in stray if a in fold(" ".join(b.get("authors") or []))]
+        if len(cands) == 1:
+            paired.append((num, title, cands[0]))
+            stray.remove(cands[0])
+        else:
+            rest.append((num, title, author, others))
+    return paired, rest, stray
+
+
 rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                    "clientInfo": {"name": "reading-list", "version": "1"}})
 rpc("notifications/initialized", notify=True)
@@ -257,9 +280,19 @@ for entry in READING_LIST:
         others = [b for b in shelf if fold(author).strip() in b["_a"]]
         missing.append((num, title, author, others))
 
+# Books already carrying the tag that the matcher did not recognise —
+# see pair_by_author().
+reconciled, stray = [], []
+if TAG:
+    matched_ids = {b["id"] for _, _, hits in found for b in hits}
+    tagged = [b for b in shelf
+              if TAG in (b.get("tags") or []) and b["id"] not in matched_ids]
+    reconciled, missing, stray = pair_by_author(missing, tagged)
+
 print("\n" + "=" * 74)
 print("IN THE LIBRARY: %d of %d works   (%d books, multi-volume counted)"
-      % (len(found), len(READING_LIST), sum(len(h) for _, _, h in found)))
+      % (len(found) + len(reconciled), len(READING_LIST),
+         sum(len(h) for _, _, h in found) + len(reconciled)))
 print("=" * 74)
 print("\nMISSING (%d):" % len(missing))
 for num, title, author, others in missing:
@@ -268,9 +301,25 @@ for num, title, author, others in missing:
         print("        same author in library: id=%-5s %s"
               % (o["id"], (o.get("title") or "")[:52]))
 
+if reconciled:
+    print("\nRECOGNISED BY THE TAG ONLY (%d) — tagged by hand; the title in "
+          "calibre differs from the one on the list:" % len(reconciled))
+    for num, title, b in reconciled:
+        print("  %2d  %-34s id=%-5s %-34s %s"
+              % (num, title[:34], b["id"], (b.get("title") or "")[:34],
+                 ", ".join(b.get("authors") or [])))
+
+if stray:
+    print("\nTAGGED BUT UNRECOGNISED (%d) — either not on the list, or a gap "
+          "in the matching:" % len(stray))
+    for b in sorted(stray, key=lambda x: x["id"]):
+        print("  id=%-5s %-40s %s" % (b["id"], (b.get("title") or "")[:40],
+                                      ", ".join(b.get("authors") or [])))
+
 if TAG:
     print("\n" + "=" * 70)
     books = [b for _, _, hits in found for b in hits]
+    books += [b for _, _, b in reconciled]
     print("Tagging %d books with %r (existing tags kept)" % (len(books), TAG))
     ok = skipped = 0
     for b in books:

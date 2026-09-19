@@ -285,6 +285,33 @@ python3 scripts/smoke.py --convert 896:azw3 # also converts one book
 Then just ask Claude: *"how many books are in my calibre library?"* or
 *"convert Robinson Crusoe to azw3"*.
 
+### Auditing a library against a reading list
+
+`scripts/reading_list.py` is a worked example of driving the server from
+plain Python: it fetches the whole library once, matches it locally against
+a fixed list of works, and can tag what it finds.
+
+```bash
+python3 scripts/reading_list.py                       # report only
+python3 scripts/reading_list.py --tag maturita        # also tag the matches
+python3 scripts/reading_list.py --tag maturita \
+        --saved-search "Literatura k maturite"        # + a saved search
+python3 scripts/reading_list.py --show-tags maturita  # audit the tagging
+```
+
+Two things worth copying:
+
+* **Tagging merges.** `set_metadata` *replaces* the tag list, so the script
+  reads the book's tags, appends, and writes the whole list back. Running it
+  twice changes nothing.
+* **A hand-added tag wins over the matcher.** Titles in a library rarely
+  match a reading list word for word — omnibus volumes, subtitles, other
+  editions. If you tag such a book yourself, `pair_by_author()` pairs it with
+  the one missing work by the same author and counts the work as present.
+  Two candidates for one author stay unresolved rather than being guessed at,
+  and anything left over is printed under **TAGGED BUT UNRECOGNISED** so you
+  can see what the matcher missed.
+
 ---
 
 ## Working with several libraries
