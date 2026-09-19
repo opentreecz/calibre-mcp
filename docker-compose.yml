@@ -7,39 +7,39 @@ services:
 
     environment:
       # --- Calibre Content Server ---------------------------------------
-      # host.docker.internal = hostitelský stroj (viz extra_hosts níže).
-      # Když Calibre běží jinde, dej sem rovnou jeho adresu.
+      # host.docker.internal = the host machine (see extra_hosts below).
+      # If calibre runs elsewhere, put its address here directly.
       CALIBRE_URL: "http://host.docker.internal:8080"
-      # Výchozí knihovna; každý nástroj ji umí přebít parametrem `library`.
+      # Default library; every tool can override it with `library`.
       CALIBRE_LIBRARY_ID: "Calibre_Library"
-      # Přihlášení se bere z .env (viz .env.example), ne odsud —
-      # ať se heslo nedostane do gitu.
+      # Credentials come from .env (see .env.example), not from here,
+      # so the password stays out of git.
       CALIBRE_USER: "${CALIBRE_USER:-}"
       CALIBRE_PASSWORD: "${CALIBRE_PASSWORD:-}"
       CALIBRE_AUTH: "${CALIBRE_AUTH:-digest}"   # digest | basic | none
 
-      # Zápis se přepíná v .env. Výchozí 1 = jen pro čtení.
+      # Writing is toggled in .env. Default 1 = read-only.
       CALIBRE_READONLY: "${CALIBRE_READONLY:-1}"
 
       CALIBRE_TIMEOUT: "120"
 
       # --- MCP transport -------------------------------------------------
-      # stdio by tu nedávalo smysl: proces musí spouštět přímo MCP klient.
+      # stdio makes no sense here: the MCP client has to spawn the process.
       MCP_TRANSPORT: "streamable-http"
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8765"
       MCP_PATH: "/mcp"
 
     ports:
-      - "127.0.0.1:8765:8765"   # jen z localhostu, ven to nepouštíme
+      - "127.0.0.1:8765:8765"   # localhost only; not exposed to the network
 
-    # Aby kontejner dosáhl na Calibre běžící na hostiteli.
+    # Lets the container reach calibre running on the host.
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-    # Alternativa pro Linux, když host-gateway nefunguje: zakomentuj
-    # ports i extra_hosts výše a odkomentuj tohle. Pak platí
-    # CALIBRE_URL=http://localhost:8080 a MCP poslouchá přímo na hostiteli.
+    # Linux fallback if host-gateway does not work: comment out ports and
+    # extra_hosts above and uncomment this. Then use
+    # CALIBRE_URL=http://localhost:8080 and MCP listens on the host directly.
     # network_mode: host
 
     security_opt:

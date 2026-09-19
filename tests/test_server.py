@@ -32,20 +32,20 @@ def srv(monkeypatch):
 def test_lists_both_libraries(srv):
     m, _ = srv
     out = json.loads(m.list_libraries())
-    assert set(out["knihovny"]) == {"Calibre_Library", "calibre_pdb"}
-    assert out["vychozi_na_serveru"] == "Calibre_Library"
+    assert set(out["libraries"]) == {"Calibre_Library", "calibre_pdb"}
+    assert out["server_default"] == "Calibre_Library"
 
 
 def test_search_defaults_to_default_library(srv):
     m, _ = srv
-    assert [b["title"] for b in json.loads(m.search_books())["knihy"]] == ["Main Book"]
+    assert [b["title"] for b in json.loads(m.search_books())["books"]] == ["Main Book"]
 
 
 def test_search_routes_to_named_library(srv):
     m, _ = srv
     out = json.loads(m.search_books(library="calibre_pdb"))
-    assert out["knihovna"] == "calibre_pdb"
-    assert [b["title"] for b in out["knihy"]] == ["PDB Book"]
+    assert out["library"] == "calibre_pdb"
+    assert [b["title"] for b in out["books"]] == ["PDB Book"]
 
 
 def test_search_all_libraries_covers_both(srv):
@@ -64,7 +64,7 @@ def test_unknown_library_lists_valid_ones(srv):
 def test_download_hits_the_right_library(srv, tmp_path):
     m, _ = srv
     res = json.loads(m.download_book(7, str(tmp_path), "pdf", library="calibre_pdb"))
-    assert Path(res["soubor"]).read_bytes() == b"FAKE:calibre_pdb:pdf:7"
+    assert Path(res["file"]).read_bytes() == b"FAKE:calibre_pdb:pdf:7"
 
 
 # --------------------------------------------------------------- edits
@@ -104,16 +104,16 @@ def test_readonly_blocks_writes(srv):
 def test_conversion_options_lists_formats(srv):
     m, _ = srv
     out = json.loads(m.conversion_options(7, library="calibre_pdb"))
-    assert out["vstupni_formaty"] == ["PDF"]
-    assert "epub" in out["vystupni_formaty"]
+    assert out["input_formats"] == ["PDF"]
+    assert "epub" in out["output_formats"]
 
 
 def test_convert_runs_on_the_server_and_polls(srv):
     m, state = srv
     state.polls_before_done = 2          # force at least one "running" poll
     out = json.loads(m.convert_book(7, "epub", library="calibre_pdb"))
-    assert out["ok"] and out["novy_format"] == "epub"
-    assert out["bajtu"] == 4242
+    assert out["ok"] and out["new_format"] == "epub"
+    assert out["bytes"] == 4242
     started = [s for s in state.seen if s[0] == "CONV_START"]
     assert started[-1][1:5] == ("calibre_pdb", 7, "pdf", "epub")
     # the server adds the format itself
@@ -131,7 +131,7 @@ def test_convert_passes_options_through(srv):
 def test_convert_without_wait_returns_job_id(srv):
     m, _ = srv
     out = json.loads(m.convert_book(1, "mobi", wait=False))
-    assert isinstance(out["job_id"], int) and out["stav"] == "spusteno"
+    assert isinstance(out["job_id"], int) and out["status"] == "started"
 
 
 def test_job_status_can_abort(srv):
@@ -164,3 +164,34 @@ def test_readonly_blocks_conversion(srv):
             m.convert_book(1, "mobi")
     finally:
         m.READONLY = False
+
+
+# ----------------------------------------------- all libraries at once
+
+def test_search_with_library_all_covers_every_library(srv):
+    m, _ = srv
+    out = json.loads(m.search_books(query="x", library="all"))
+    assert set(out) == {"Calibre_Library", "calibre_pdb"}
+
+
+def test_libraries_overview_totals_across_libraries(srv):
+    m, _ = srv
+    out = json.loads(m.libraries_overview())
+    assert set(out["libraries"]) == {"Calibre_Library", "calibre_pdb"}
+    # one book in each mock library
+    assert out["all_libraries"]["total_books"] == 2
+    # Main Book has EPUB+PDF, PDB Book has PDF -> pdf appears twice
+    assert out["all_libraries"]["formats"]["pdf"] == 2
+
+
+def test_library_stats_all_delegates_to_overview(srv):
+    m, _ = srv
+    out = json.loads(m.library_stats(library="all"))
+    assert "all_libraries" in out
+
+
+def test_all_is_refused_where_a_single_book_is_meant(srv):
+    m, _ = srv
+    with pytest.raises(m.CalibreError) as e:
+        m.get_book(1, library="all")
+    assert "one book" in str(e.value)

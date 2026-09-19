@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" width="900" height="340" role="img" aria-label="Architecture: MCP client to calibre-mcp container to calibre Content Server to two libraries">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#57606a"/>
+    </marker>
+    <style>
+      .t{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif}
+      .h{font-size:15px;font-weight:600;fill:#1f2328}
+      .s{font-size:12px;fill:#57606a}
+      .l{font-size:11.5px;fill:#57606a}
+      .m{font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:#0a3069}
+      .box{fill:#ffffff;stroke:#d0d7de;stroke-width:1.5;rx:8}
+    </style>
+  </defs>
+  <rect width="900" height="340" fill="#f6f8fa"/>
+
+  <rect class="box" x="24" y="46" width="200" height="86"/>
+  <text class="t h" x="124" y="78" text-anchor="middle">MCP client</text>
+  <text class="t s" x="124" y="98" text-anchor="middle">Claude Desktop</text>
+  <text class="t s" x="124" y="115" text-anchor="middle">Claude Code / Cowork</text>
+
+  <line x1="230" y1="89" x2="336" y2="89" stroke="#57606a" stroke-width="1.5" marker-end="url(#a)"/>
+  <text class="t m" x="283" y="76" text-anchor="middle">streamable-http</text>
+  <text class="t l" x="283" y="108" text-anchor="middle">127.0.0.1:8765/mcp</text>
+
+  <rect class="box" x="342" y="34" width="220" height="110"/>
+  <text class="t h" x="452" y="62" text-anchor="middle">calibre-mcp</text>
+  <text class="t s" x="452" y="82" text-anchor="middle">Docker container</text>
+  <text class="t l" x="452" y="102" text-anchor="middle">python:3.12-slim-bookworm</text>
+  <text class="t l" x="452" y="122" text-anchor="middle" font-style="italic">no calibre inside</text>
+
+  <line x1="568" y1="89" x2="674" y2="89" stroke="#57606a" stroke-width="1.5" marker-end="url(#a)"/>
+  <text class="t m" x="621" y="76" text-anchor="middle">HTTP + digest</text>
+  <text class="t l" x="621" y="108" text-anchor="middle">:8080</text>
+
+  <rect class="box" x="680" y="46" width="196" height="86"/>
+  <text class="t h" x="778" y="78" text-anchor="middle">calibre</text>
+  <text class="t s" x="778" y="98" text-anchor="middle">Content Server</text>
+  <text class="t l" x="778" y="115" text-anchor="middle">does the converting</text>
+
+  <line x1="778" y1="138" x2="778" y2="196" stroke="#57606a" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <rect class="box" x="612" y="200" width="150" height="58"/>
+  <text class="t m" x="687" y="224" text-anchor="middle">Calibre_Library</text>
+  <text class="t l" x="687" y="243" text-anchor="middle">758 books</text>
+
+  <rect class="box" x="778" y="200" width="98" height="58"/>
+  <text class="t m" x="827" y="224" text-anchor="middle">calibre_pdb</text>
+  <text class="t l" x="827" y="243" text-anchor="middle">archive</text>
+
+  <text class="t l" x="24" y="296">Every tool takes a <tspan class="m">library</tspan> argument; <tspan class="m">library="all"</tspan> spans both.</text>
+  <text class="t l" x="24" y="316">The container holds no library data — calibre owns the files.</text>
+</svg>

@@ -101,7 +101,7 @@ print(out[:1500])
 
 head("5. conversion_options for the first book found")
 try:
-    first = json.loads(out)["knihy"][0]
+    first = json.loads(out)["books"][0]
     print("book:", first["id"], first["title"], first["formats"])
     print(call("conversion_options", book_id=first["id"]))
 except Exception as e:

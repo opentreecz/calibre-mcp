@@ -1,6 +1,6 @@
 # Debian stable (bookworm) + Python 3.12.
-# Calibre uvnitř NENÍ potřeba: převod formátů běží na Content Serveru
-# (endpointy /conversion/*), tenhle kontejner s ním jen mluví přes HTTP.
+# No calibre inside: conversion runs on the Content Server itself
+# (the /conversion/* endpoints); this container only talks HTTP to it.
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
@@ -13,13 +13,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# zavislosti zvlast, at se vrstva cachuje
+# dependencies first so the layer caches
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY calibre_mcp.py .
 
-# bezet jako neprivilegovany uzivatel
+# run unprivileged
 RUN useradd --create-home --uid 10001 mcp \
  && chown -R mcp:mcp /app
 USER mcp
