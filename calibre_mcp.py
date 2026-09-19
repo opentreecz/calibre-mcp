@@ -18,12 +18,14 @@ Použité endpointy (ověřeno proti zdrojovým kódům calibre):
   POST /cdb/set-fields/{id}/{lib}      {"changes": {...}}
   POST /cdb/add-book/{job}/{dup}/{filename}/{lib}   (tělo = binární soubor)
   POST /cdb/copy-to-library/{cil}/{lib}
+  GET  /conversion/book-data/{id}?library_id=   dostupné formáty a volby
+  POST /conversion/start/{id}?library_id=       spustí převod, vrátí job_id
+  GET  /conversion/status/{job}?library_id=     průběh; po dokončení server
+                                                sám přidá formát ke knize
 
-POZOR — převod formátů API neumí. Content Server žádný konverzní endpoint
-nemá (conversion je v calibre věc GUI fronty a nástroje ebook-convert).
-`convert_book` proto stáhne zdroj přes API, převede ho lokálním
-ebook-convert a výsledek nahraje zpět jako nový formát. Na stroji, kde běží
-tenhle MCP server, tedy musí být ebook-convert. Všechno ostatní je čisté API.
+Převod formátů běží na straně Calibre (endpointy /conversion/*). Server
+si převedený formát sám přidá ke knize, takže tenhle MCP server nepotřebuje
+lokálně nainstalované Calibre ani ebook-convert — všechno je čisté HTTP.
 
 Konfigurace přes proměnné prostředí:
   CALIBRE_URL        základ, např. http://localhost:8080   (povinné)
@@ -31,7 +33,6 @@ Konfigurace přes proměnné prostředí:
   CALIBRE_USER       uživatel (volitelné)
   CALIBRE_PASSWORD   heslo (volitelné)
   CALIBRE_AUTH       digest (výchozí) | basic | none
-  EBOOK_CONVERT      cesta k ebook-convert (výchozí: z PATH)
   CALIBRE_READONLY   "1" = zakáže zápisové nástroje
   CALIBRE_TIMEOUT    timeout HTTP v sekundách (výchozí 120)
   CALIBRE_VERIFY_TLS "0" = nekontrolovat certifikát (jen pro self-signed v LAN)
@@ -41,8 +42,7 @@ import json
 import mimetypes
 import os
 import re
-import subprocess
-import tempfile
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import quote
@@ -61,7 +61,6 @@ LIB = os.environ.get("CALIBRE_LIBRARY_ID", "").strip()
 USER = os.environ.get("CALIBRE_USER", "").strip()
 PASSWORD = os.environ.get("CALIBRE_PASSWORD", "")
 AUTH_MODE = os.environ.get("CALIBRE_AUTH", "digest").strip().lower()
-EBOOK_CONVERT = os.environ.get("EBOOK_CONVERT", "ebook-convert")
 READONLY = os.environ.get("CALIBRE_READONLY", "") == "1"
 TIMEOUT = int(os.environ.get("CALIBRE_TIMEOUT", "120"))
 VERIFY = os.environ.get("CALIBRE_VERIFY_TLS", "1") != "0"
@@ -164,6 +163,13 @@ def _libseg(library: str = "") -> str:
     """Koncový segment cesty s ID knihovny (prázdný = výchozí knihovna)."""
     lib = _resolve(library)
     return ("/" + quote(lib, safe="")) if lib else ""
+
+
+def _libq(library: str = "") -> dict:
+    """Knihovna jako query parametr — endpointy /conversion/* ji berou tak,
+    ne jako segment cesty."""
+    lib = _resolve(library)
+    return {"library_id": lib} if lib else {}
 
 
 def _guard_write() -> None:
@@ -433,64 +439,136 @@ def copy_to_library(book_ids: list, target_library: str,
 # ------------------------------------------------------- převod formátu
 
 @mcp.tool()
+def conversion_options(book_id: int, output_format: str = "",
+                       library: str = "") -> str:
+    """Zjistí, z jakých formátů a do jakých se dá kniha převést, a jaké
+    volby Calibre pro tu kombinaci nabízí.
+
+    Volej před `convert_book`, když si nejsi jistý, co je k dispozici."""
+    params = _libq(library)
+    if output_format:
+        params["output_fmt"] = output_format.lower().lstrip(".")
+    data = _json("GET", "/conversion/book-data/%d" % int(book_id), params=params)
+    opts = data.get("conversion_options") or {}
+    return json.dumps(
+        {"kniha": {"id": data.get("book_id"), "title": data.get("title"),
+                   "authors": data.get("authors")},
+         "vstupni_formaty": data.get("input_formats"),
+         "vystupni_formaty": data.get("output_formats"),
+         "profily": list((data.get("profiles") or {}).keys())
+                    if isinstance(data.get("profiles"), dict)
+                    else data.get("profiles"),
+         "volby": sorted(opts.get("options", {}) if isinstance(opts, dict) else [])
+                  or opts},
+        ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
 def convert_book(book_id: int, to_format: str, from_format: str = "",
-                 extra_args: str = "", save_to: str = "",
-                 library: str = "") -> str:
-    """Převede knihu do jiného formátu.
+                 options: dict = None, wait: bool = True,
+                 timeout_s: int = 900, library: str = "") -> str:
+    """Převede knihu do jiného formátu **na straně Calibre serveru**.
 
-    API Calibre převod neumí, takže tenhle nástroj: stáhne zdroj přes /get,
-    pustí lokální ebook-convert a výsledek nahraje zpět jako nový formát.
-    Na stroji s tímhle MCP serverem tedy musí být ebook-convert.
+    Server převod zařadí do fronty a po dokončení si nový formát sám přidá
+    ke knize. Tenhle MCP server k tomu nepotřebuje lokální ebook-convert.
 
-    Když zadáš `save_to`, výsledek se jen uloží do toho adresáře a do
-    knihovny se nic nezapíše. `extra_args` jdou rovnou do ebook-convert."""
+    `options` jsou volby převodu podle Calibre (co je povolené, ukáže
+    `conversion_options`). `wait=False` jen spustí úlohu a vrátí job_id;
+    stav pak zjistíš přes `conversion_job_status`."""
+    _guard_write()
     to_fmt = to_format.lower().lstrip(".")
     if not to_fmt.isalnum():
         raise CalibreError("Nepřípustný formát: %s" % to_format)
-    if not save_to:
-        _guard_write()
 
-    src_fmt = _pick_format(int(book_id), from_format, library)
-    if src_fmt == to_fmt and not save_to:
-        raise CalibreError("Kniha už ve formátu %s je." % to_fmt)
+    # zjistit vstupni format a overit, ze cil ma smysl
+    info = _json("GET", "/conversion/book-data/%d" % int(book_id),
+                 params=_libq(library))
+    inputs = [str(x).lower() for x in (info.get("input_formats") or [])]
+    outputs = [str(x).lower() for x in (info.get("output_formats") or [])]
+    if not inputs:
+        raise CalibreError("Kniha %d nemá žádný formát, ze kterého by šlo "
+                           "převádět." % book_id)
+    src = (from_format or inputs[0]).lower().lstrip(".")
+    if src not in inputs:
+        raise CalibreError("Z formátu %s převádět nejde. Kniha nabízí: %s"
+                           % (src, ", ".join(inputs)))
+    if outputs and to_fmt not in outputs:
+        raise CalibreError("Do formátu %s Calibre nepřevádí. Nabízí: %s"
+                           % (to_fmt, ", ".join(outputs)))
 
-    with tempfile.TemporaryDirectory(prefix="calibre-api-mcp-") as tmp:
-        tmpd = Path(tmp)
-        r = _req("GET", "/get/%s/%d%s" % (quote(src_fmt), int(book_id),
-                                          _libseg(library)), stream=True)
-        src = tmpd / ("zdroj." + src_fmt)
-        with open(src, "wb") as fh:
-            for chunk in r.iter_content(65536):
-                fh.write(chunk)
+    body = {"input_fmt": src, "output_fmt": to_fmt, "options": options or {}}
+    job_id = _json("POST", "/conversion/start/%d" % int(book_id),
+                   params=_libq(library), json=body)
+    if not isinstance(job_id, int):
+        raise CalibreError("Server nevrátil id úlohy: %r" % (job_id,))
 
-        out = tmpd / ("vystup." + to_fmt)
-        cmd = [EBOOK_CONVERT, str(src), str(out)]
-        if extra_args:
-            cmd += extra_args.split()
-        try:
-            p = subprocess.run(cmd, capture_output=True, text=True,
-                               timeout=max(TIMEOUT, 600), check=False)
-        except FileNotFoundError as e:
+    if not wait:
+        return json.dumps({"ok": True, "job_id": job_id, "stav": "spusteno",
+                           "z": src, "do": to_fmt,
+                           "knihovna": _resolve(library) or "(výchozí)"},
+                          ensure_ascii=False)
+
+    deadline = time.monotonic() + max(10, int(timeout_s))
+    delay = 1.0
+    while True:
+        st = _json("GET", "/conversion/status/%d" % job_id,
+                   params=_libq(library))
+        if not st.get("running"):
+            if st.get("ok"):
+                return json.dumps(
+                    {"ok": True, "id": book_id, "z": src,
+                     "novy_format": st.get("fmt", to_fmt),
+                     "bajtu": st.get("size"),
+                     "knihovna": _resolve(library) or "(výchozí)",
+                     "poznamka": "Formát přidal ke knize sám Calibre server."},
+                    ensure_ascii=False, indent=2)
             raise CalibreError(
-                "Nenalezen ebook-convert (%s). Převod bez něj nejde — API "
-                "Calibre konverzi nenabízí." % EBOOK_CONVERT) from e
-        if p.returncode != 0 or not out.exists():
-            err = (p.stderr or p.stdout or "").strip()
-            raise CalibreError("ebook-convert selhal: %s" % err[-800:])
+                "Převod selhal%s. %s"
+                % (" (přerušeno)" if st.get("was_aborted") else "",
+                   (st.get("traceback") or st.get("log") or "")[-800:]))
+        if time.monotonic() > deadline:
+            raise CalibreError(
+                "Převod běží déle než %ss (job_id %d). Úloha na serveru běží "
+                "dál — stav zjistíš přes conversion_job_status."
+                % (timeout_s, job_id))
+        time.sleep(delay)
+        delay = min(delay * 1.5, 5.0)
 
-        if save_to:
-            dest = Path(save_to).expanduser()
-            dest.mkdir(parents=True, exist_ok=True)
-            final = dest / out.name
-            final.write_bytes(out.read_bytes())
-            return json.dumps({"ok": True, "ulozeno": str(final),
-                               "zdroj_format": src_fmt,
-                               "bajtu": final.stat().st_size},
-                              ensure_ascii=False)
 
-        return _upload_format(int(book_id), to_fmt, out.read_bytes(),
-                              out.name, library)
+@mcp.tool()
+def conversion_job_status(job_id: int, abort: bool = False,
+                          library: str = "") -> str:
+    """Zjistí stav převodní úlohy spuštěné s `wait=False`,
+    nebo ji s `abort=True` zruší."""
+    params = _libq(library)
+    if abort:
+        params["abort_job"] = "1"
+    st = _json("GET", "/conversion/status/%d" % int(job_id), params=params)
+    return json.dumps(st, ensure_ascii=False, indent=2)
+
+
+def main() -> None:
+    """stdio (výchozí) nebo HTTP. V kontejneru dává smysl streamable-http —
+    stdio potřebuje, aby proces spouštěl přímo MCP klient."""
+    transport = os.environ.get("MCP_TRANSPORT", "stdio").strip().lower()
+    if transport == "stdio":
+        mcp.run()
+        return
+    host = os.environ.get("MCP_HOST", "0.0.0.0")
+    port = int(os.environ.get("MCP_PORT", "8765"))
+    path = os.environ.get("MCP_PATH", "/mcp")
+    try:
+        mcp.run(transport=transport, host=host, port=port,
+                streamable_http_path=path)
+    except TypeError:
+        # mcp 1.x bere host/port z nastaveni instance, ne z run()
+        for attr, val in (("host", host), ("port", port)):
+            try:
+                setattr(mcp.settings, attr, val)
+            except Exception:
+                pass
+        mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
-    mcp.run()
+    main()

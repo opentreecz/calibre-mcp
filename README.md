@@ -19,22 +19,21 @@ different machine.
 - **Convert** — epub / azw3 / mobi / pdf / docx …, result uploaded back to
   the book as an additional format
 
-## Important: conversion is not an API feature
+## Conversion runs on the calibre server
 
-The calibre Content Server exposes **no conversion endpoint** — conversion in
-calibre is a GUI job-queue and `ebook-convert` feature, and is not available
-over HTTP. `convert_book` therefore downloads the source via `/get`, runs a
-**local** `ebook-convert`, and uploads the result back through
-`/cdb/set-fields`.
+Conversion uses the Content Server's own `/conversion/*` endpoints: the
+server queues the job, runs it, and **adds the resulting format to the book
+itself**. This client only starts the job and polls for its status.
 
-So the machine running this MCP server needs calibre installed for
-`ebook-convert`. Every other tool is pure HTTP and needs nothing local.
+That means **calibre does not need to be installed alongside this server** —
+everything is plain HTTP. Handy for the Docker image, which stays small.
 
 ## Requirements
 
 - Python 3.10+
 - A running calibre Content Server with write access enabled
-- calibre installed locally — only if you want `convert_book`
+
+Nothing else. No local calibre, no `ebook-convert`.
 
 ## Install
 
@@ -53,10 +52,11 @@ python3 -m venv .venv
 | `CALIBRE_LIBRARY_ID` | default library; override per call with `library` |
 | `CALIBRE_USER` / `CALIBRE_PASSWORD` | if the server requires auth |
 | `CALIBRE_AUTH` | `digest` (default) \| `basic` \| `none` |
-| `EBOOK_CONVERT` | path to `ebook-convert` (default: from `PATH`) |
 | `CALIBRE_READONLY` | `1` disables all write tools |
 | `CALIBRE_TIMEOUT` | HTTP timeout in seconds (default 120) |
 | `CALIBRE_VERIFY_TLS` | `0` to skip certificate checks (self-signed on a LAN) |
+| `MCP_TRANSPORT` | `stdio` (default) or `streamable-http` for container use |
+| `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | HTTP transport bind settings |
 
 calibre defaults to **digest** auth. Behind a reverse proxy you normally
 switch it to basic (`--auth-mode=basic`) — then set `CALIBRE_AUTH=basic`.
@@ -87,6 +87,44 @@ Preferences → Sharing over the net. Never run both against one library.
 }
 ```
 
+## Docker
+
+The image is Debian stable (bookworm) + Python 3.12 and contains no calibre,
+because conversion happens server-side.
+
+```bash
+docker compose build
+docker compose up -d
+docker compose logs -f
+```
+
+The container speaks **streamable-http** on `127.0.0.1:8765/mcp`. stdio is
+not usable here — with stdio the MCP client has to spawn the process itself,
+which a long-running service cannot provide.
+
+`docker-compose.yml` reaches calibre on the host through
+`host.docker.internal` (mapped via `extra_hosts: host-gateway`). If that does
+not work on your system, switch the service to `network_mode: host` — the
+file has it prepared and commented out.
+
+One catch: calibre must be listening on an interface the container can
+reach. If `calibre-server` is bound to `127.0.0.1` only, the container will
+not get through — start it with `--listen-on 0.0.0.0`, or use
+`network_mode: host`.
+
+Point your MCP client at the HTTP endpoint:
+
+```json
+{
+  "mcpServers": {
+    "calibre": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}
+```
+
 ## Tools
 
 | Tool | Pure API? | Purpose |
@@ -101,7 +139,9 @@ Preferences → Sharing over the net. Never run both against one library.
 | `add_book` | yes | upload a file as a new book |
 | `add_format` | yes | attach another format to an existing book |
 | `copy_to_library` | yes | copy or move books between libraries |
-| `convert_book` | hybrid | download → local `ebook-convert` → upload back |
+| `conversion_options` | yes | which input/output formats and options a book supports |
+| `convert_book` | yes | queue a conversion on the server and wait for it |
+| `conversion_job_status` | yes | poll or abort a job started with `wait=False` |
 
 Deleting books is deliberately not implemented, even though
 `/cdb/delete-books` exists. An irreversible operation triggered by accident
@@ -120,7 +160,13 @@ GET  /get/{fmt}/{id}/{lib}
 POST /cdb/set-fields/{id}/{lib}
 POST /cdb/add-book/{job}/{dup}/{filename}/{lib}
 POST /cdb/copy-to-library/{target}/{lib}
+GET  /conversion/book-data/{id}?library_id=
+POST /conversion/start/{id}?library_id=
+GET  /conversion/status/{job}?library_id=
 ```
+
+Note that `/conversion/*` takes the library as a **query parameter**, while
+`/ajax/*` and `/cdb/*` take it as a path segment.
 
 Adding a format has no endpoint of its own — it goes through `set-fields`
 with the special `added_formats` field, the file passed as a base64 data URL.

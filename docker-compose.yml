@@ -1,0 +1,45 @@
+services:
+  calibre-mcp:
+    build: .
+    image: calibre-mcp:latest
+    container_name: calibre-mcp
+    restart: unless-stopped
+
+    environment:
+      # --- Calibre Content Server ---------------------------------------
+      # host.docker.internal = hostitelský stroj (viz extra_hosts níže).
+      # Když Calibre běží jinde, dej sem rovnou jeho adresu.
+      CALIBRE_URL: "http://host.docker.internal:8080"
+      # Výchozí knihovna; každý nástroj ji umí přebít parametrem `library`.
+      CALIBRE_LIBRARY_ID: "Calibre_Library"
+      # Odkomentuj, když má server zapnutou autentizaci:
+      # CALIBRE_USER: "lukas"
+      # CALIBRE_PASSWORD: "heslo"
+      # CALIBRE_AUTH: "digest"        # digest (výchozí) | basic | none
+
+      # Pro první ostrý běh doporučeno: zakáže všechny zápisové nástroje.
+      CALIBRE_READONLY: "1"
+
+      CALIBRE_TIMEOUT: "120"
+
+      # --- MCP transport -------------------------------------------------
+      # stdio by tu nedávalo smysl: proces musí spouštět přímo MCP klient.
+      MCP_TRANSPORT: "streamable-http"
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8765"
+      MCP_PATH: "/mcp"
+
+    ports:
+      - "127.0.0.1:8765:8765"   # jen z localhostu, ven to nepouštíme
+
+    # Aby kontejner dosáhl na Calibre běžící na hostiteli.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # Alternativa pro Linux, když host-gateway nefunguje: zakomentuj
+    # ports i extra_hosts výše a odkomentuj tohle. Pak platí
+    # CALIBRE_URL=http://localhost:8080 a MCP poslouchá přímo na hostiteli.
+    # network_mode: host
+
+    security_opt:
+      - no-new-privileges:true

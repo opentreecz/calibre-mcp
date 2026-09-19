@@ -20,20 +20,21 @@ Zmínil jste obojí. Jsou to dva různé projekty s různým API:
   omezený. Pro tenhle účel je Content Server jednoznačně lepší volba —
   je oficiální, umí zápis a nepřidává další komponentu.
 
-### Převod formátů přes API nejde
+### Převod formátů běží na serveru
 
-Prošel jsem zdrojáky `srv/ajax.py`, `srv/cdb.py` i `srv/content.py`.
-**Content Server nemá žádný konverzní endpoint.** Převod je v Calibre
-záležitost fronty v GUI a nástroje `ebook-convert`; po HTTP se nevystavuje.
+Content Server má vlastní konverzní endpointy `srv/convert.py`:
+`/conversion/book-data/{id}`, `/conversion/start/{id}` a
+`/conversion/status/{job}`. Server úlohu zařadí do fronty, zpracuje ji
+a **hotový formát si sám přidá ke knize** — klient jen spustí a doptává se
+na průběh.
 
-`convert_book` to řeší takhle: stáhne zdroj přes `/get`, pustí **lokální**
-`ebook-convert` a výsledek nahraje zpět jako nový formát přes
-`/cdb/set-fields`. Takže na stroji, kde běží MCP server, musí být
-nainstalované Calibre kvůli `ebook-convert`. Všechno ostatní — čtení,
-hledání, úpravy metadat, přidávání knih — je čisté API.
+Prakticky to znamená, že tenhle MCP server **nepotřebuje lokálně
+nainstalované Calibre ani `ebook-convert`**. Všechno je čisté HTTP, což se
+hodí hlavně v Dockeru — obraz zůstane malý.
 
-Kdyby vám to vadilo, jediná alternativa je nechat převádět GUI ručně;
-API cesta neexistuje.
+> Dřívější verze tohoto návodu tvrdila, že převod přes API nejde. Bylo to
+> špatně: hledal jsem konverzní endpoint v `ajax.py`, `cdb.py` a
+> `content.py`, ale bydlí v samostatném `convert.py`.
 
 ---
 
@@ -183,7 +184,6 @@ Cesty absolutní, `~` se nerozvíjí.
 | `CALIBRE_LIBRARY_ID` | **výchozí** knihovna; přebít jde parametrem `library` |
 | `CALIBRE_USER` / `CALIBRE_PASSWORD` | když má server autentizaci |
 | `CALIBRE_AUTH` | `digest` (výchozí) \| `basic` \| `none` |
-| `EBOOK_CONVERT` | cesta ke konvertoru (jen pro `convert_book`) |
 | `CALIBRE_READONLY` | `1` zakáže zápisové nástroje |
 | `CALIBRE_TIMEOUT` | timeout HTTP, výchozí 120 s |
 | `CALIBRE_VERIFY_TLS` | `0` pro self-signed certifikát v LAN |
@@ -208,7 +208,9 @@ obvykle přepíná na `basic` (`--auth-mode=basic`) — pak nastavte
 | `set_metadata` | ano | změna názvu, autorů, tagů, série, hodnocení |
 | `add_book` | ano | nahrání nové knihy |
 | `add_format` | ano | přidání dalšího formátu k existující knize |
-| `convert_book` | **hybrid** | stáhne → lokální `ebook-convert` → nahraje zpět |
+| `conversion_options` | ano | jaké formáty a volby kniha pro převod nabízí |
+| `convert_book` | ano | zařadí převod na serveru a počká na dokončení |
+| `conversion_job_status` | ano | průběh / zrušení úlohy spuštěné s `wait=False` |
 
 ### Dvě knihovny
 
@@ -283,7 +285,6 @@ dělejte se zálohou a s `CALIBRE_READONLY=1`.
 | `403` | uživatel nemá právo zápisu; povolte zápis nebo `--enable-local-write` |
 | `Spojení selhalo` | server neběží, nebo poslouchá na jiném portu |
 | `Server nevrátil JSON` | `CALIBRE_URL` míří jinam než na Content Server |
-| `Nenalezen ebook-convert` | jen pro převod; nastavte `EBOOK_CONVERT` |
 | prázdné výsledky | špatné `CALIBRE_LIBRARY_ID` — ověřte `list_libraries` |
 
 Rychlý test mimo MCP:
@@ -304,3 +305,4 @@ Když neprojde tohle, chyba není v MCP serveru.
 - [srv/ajax.py](https://github.com/kovidgoyal/calibre/blob/master/src/calibre/srv/ajax.py)
 - [srv/cdb.py](https://github.com/kovidgoyal/calibre/blob/master/src/calibre/srv/cdb.py)
 - [srv/content.py](https://github.com/kovidgoyal/calibre/blob/master/src/calibre/srv/content.py)
+- [srv/convert.py](https://github.com/kovidgoyal/calibre/blob/master/src/calibre/srv/convert.py)

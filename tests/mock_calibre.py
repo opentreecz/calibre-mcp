@@ -31,6 +31,16 @@ class State:
     def __init__(self):
         self.db = fresh_db()
         self.seen = []
+        self.jobs = {}          # job_id -> dict
+        self.next_job = 100
+        self.polls_before_done = 1   # kolikrat vratit running=True
+
+
+def _query_lib(path):
+    from urllib.parse import urlparse, parse_qs
+    q = parse_qs(urlparse(path).query)
+    lib = (q.get("library_id") or [""])[0]
+    return lib if lib in LIBS else DEFAULT, q
 
 
 def _lib_after(path, prefix):
@@ -55,9 +65,71 @@ def make_handler(state):
             self.end_headers()
             self.wfile.write(body)
 
+        def _conversion(self, p, raw=b""):
+            """Vrati True, pokud slo o /conversion/* a bylo obslouzeno."""
+            lib, q = _query_lib(self.path)
+            m = re.match(r"^/conversion/book-data/(\d+)$", p)
+            if m:
+                bid = int(m.group(1))
+                if bid not in state.db[lib]:
+                    self._send(404, {"error": "no such book"}); return True
+                have = [f.lower() for f in state.db[lib][bid]["formats"]]
+                self._send(200, {
+                    "book_id": bid,
+                    "title": state.db[lib][bid]["title"],
+                    "authors": state.db[lib][bid]["authors"],
+                    "input_formats": [f.upper() for f in have],
+                    "output_formats": ["epub", "mobi", "azw3", "pdf", "docx"],
+                    "profiles": {"input": [], "output": []},
+                    "conversion_options": {"options": {"pretty_print": {}}},
+                })
+                return True
+            m = re.match(r"^/conversion/start/(\d+)$", p)
+            if m:
+                bid = int(m.group(1))
+                body = json.loads(raw) if raw else {}
+                jid = state.next_job; state.next_job += 1
+                state.jobs[jid] = {"book": bid, "lib": lib, "polls": 0,
+                                   "out": body.get("output_fmt", "epub"),
+                                   "inp": body.get("input_fmt"),
+                                   "options": body.get("options")}
+                state.seen.append(("CONV_START", lib, bid, body.get("input_fmt"),
+                                   body.get("output_fmt"), body.get("options")))
+                self._send(200, jid)
+                return True
+            m = re.match(r"^/conversion/status/(\d+)$", p)
+            if m:
+                jid = int(m.group(1))
+                job = state.jobs.get(jid)
+                if job is None:
+                    self._send(404, {"error": "no job"}); return True
+                if q.get("abort_job"):
+                    del state.jobs[jid]
+                    state.seen.append(("CONV_ABORT", jid))
+                    self._send(200, {"running": False, "ok": False,
+                                     "was_aborted": True, "traceback": None,
+                                     "log": "aborted"})
+                    return True
+                job["polls"] += 1
+                if job["polls"] <= state.polls_before_done:
+                    self._send(200, {"running": True, "percent": 0.5,
+                                     "msg": "converting"})
+                    return True
+                del state.jobs[jid]
+                fmt = job["out"]
+                state.db[job["lib"]][job["book"]]["formats"].append(fmt.upper())
+                state.seen.append(("CONV_DONE", job["lib"], job["book"], fmt))
+                self._send(200, {"running": False, "ok": True,
+                                 "was_aborted": False, "traceback": None,
+                                 "log": "ok", "size": 4242, "fmt": fmt})
+                return True
+            return False
+
         def do_GET(self):
             p = self.path.split("?")[0]
             state.seen.append(("GET", p))
+            if p.startswith("/conversion/") and self._conversion(p):
+                return
             if p == "/ajax/library-info":
                 return self._send(200, {"library_map": LIBS,
                                         "default_library": DEFAULT})
@@ -93,6 +165,8 @@ def make_handler(state):
             raw = self.rfile.read(n)
             p = self.path.split("?")[0]
             state.seen.append(("POST", p))
+            if p.startswith("/conversion/") and self._conversion(p, raw):
+                return
             m = re.match(r"^/cdb/set-fields/(\d+)(?:/(.+))?$", p)
             if m:
                 lib = m.group(2) if m.group(2) in LIBS else DEFAULT
