@@ -137,6 +137,20 @@ def fold(s):
                                  # "R.U.R." and "R. U. R." both fold to "r u r"
 
 
+def word_matches(tok, word):
+    """Tolerate Czech declension: the list says 'Kvety zla', the library
+    has 'Vybor z Kvetu zla' — 'kvety' vs 'kvetu' differ only in the
+    ending. Author is matched separately, so this stays safe."""
+    if word.startswith(tok) or tok.startswith(word):
+        return True
+    return len(tok) >= 4 and len(word) >= 4 and tok[:-1] == word[:-1]
+
+
+def title_matches(toks, folded_title):
+    words = folded_title.split()
+    return all(any(word_matches(t, w) for w in words) for t in toks)
+
+
 def tokens(s):
     """Significant words, so a subtitle or an extra preposition cannot
     break the match: 'V zamku a podzamci' still matches
@@ -169,22 +183,25 @@ for num, title, author in READING_LIST:
     for b in shelf:
         if fold(author).strip() not in b["_a"]:
             continue
-        if toks and all(t in b["_t"] for t in toks):
+        if toks and title_matches(toks, b["_t"]):
             hits.append(b)
         elif not toks and fold(title).strip() in b["_t"]:
             hits.append(b)
     if hits:
-        b = sorted(hits, key=lambda x: len(x["_t"]))[0]
-        found.append((num, title, b))
-        print("  ok %2d  %-42s id=%-5s %-28s %s"
-              % (num, title, b["id"], (b.get("title") or "")[:28],
-                 ",".join(b.get("formats") or [])))
+        hits = sorted(hits, key=lambda x: len(x["_t"]))
+        found.append((num, title, hits))
+        for n, b in enumerate(hits):
+            print("  ok %2s  %-42s id=%-5s %-30s %s"
+                  % (num if n == 0 else "", title if n == 0 else "",
+                     b["id"], (b.get("title") or "")[:30],
+                     ",".join(b.get("formats") or [])))
     else:
         others = [b for b in shelf if fold(author).strip() in b["_a"]]
         missing.append((num, title, author, others))
 
 print("\n" + "=" * 74)
-print("IN THE LIBRARY: %d of %d" % (len(found), len(READING_LIST)))
+print("IN THE LIBRARY: %d of %d works   (%d books, multi-volume counted)"
+      % (len(found), len(READING_LIST), sum(len(h) for _, _, h in found)))
 print("=" * 74)
 print("\nMISSING (%d):" % len(missing))
 for num, title, author, others in missing:
@@ -195,12 +212,13 @@ for num, title, author, others in missing:
 
 if TAG:
     print("\n" + "=" * 70)
-    print("Tagging %d books with %r (existing tags kept)" % (len(found), TAG))
-    ok = 0
-    for num, title, b in found:
+    books = [b for _, _, hits in found for b in hits]
+    print("Tagging %d books with %r (existing tags kept)" % (len(books), TAG))
+    ok = skipped = 0
+    for b in books:
         tags = list(b.get("tags") or [])
         if TAG in tags:
-            ok += 1
+            skipped += 1
             continue
         tags.append(TAG)
         try:
@@ -209,7 +227,8 @@ if TAG:
             ok += 1
         except RuntimeError as e:
             print("  ! id=%s %s" % (b["id"], e))
-    print("tagged: %d/%d" % (ok, len(found)))
+    print("newly tagged: %d   already had it: %d   total: %d"
+          % (ok, skipped, len(books)))
 
     if SAVED_SEARCH:
         expr = "tags:%s" % TAG

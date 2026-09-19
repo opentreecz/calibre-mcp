@@ -21,6 +21,7 @@ Endpoints used (verified against the calibre sources):
   POST /cdb/set-fields/{id}/{lib}                  {"changes": {...}}
   POST /cdb/add-book/{job}/{dup}/{filename}/{lib}  (body = raw file)
   POST /cdb/copy-to-library/{target}/{lib}
+  POST /cdb/cmd/saved_searches?library_id=          ["add"|"remove"|"list",..]
   GET  /conversion/book-data/{id}?library_id=      formats and options
   POST /conversion/start/{id}?library_id=          queues a job, returns id
   GET  /conversion/status/{job}?library_id=        progress; on success the
@@ -517,8 +518,8 @@ def copy_to_library(book_ids: list, target_library: str,
 @mcp.tool()
 def list_saved_searches(library: str = "") -> str:
     """List the library's saved searches (name -> search expression)."""
-    res = _json("POST", "/cdb/cmd/saved_searches" + _libseg(library),
-                json=["list"])
+    res = _json("POST", "/cdb/cmd/saved_searches",
+                params=_libq(library), json=["list"])
     return json.dumps(res, ensure_ascii=False, indent=2)
 
 
@@ -536,8 +537,8 @@ def create_saved_search(name: str, expression: str,
     _guard_write()
     if not name.strip() or not expression.strip():
         raise CalibreError("Both a name and a search expression are required.")
-    _json("POST", "/cdb/cmd/saved_searches" + _libseg(library),
-          json=["add", name, expression])
+    _json("POST", "/cdb/cmd/saved_searches",
+          params=_libq(library), json=["add", name, expression])
     return json.dumps({"ok": True, "name": name, "expression": expression,
                        "library": _resolve(library) or "(default)",
                        "note": "Saved search created. Turn it into a Virtual "
@@ -550,8 +551,8 @@ def create_saved_search(name: str, expression: str,
 def remove_saved_search(name: str, library: str = "") -> str:
     """Delete a saved search by name. Does not touch any book."""
     _guard_write()
-    _json("POST", "/cdb/cmd/saved_searches" + _libseg(library),
-          json=["remove", name])
+    _json("POST", "/cdb/cmd/saved_searches",
+          params=_libq(library), json=["remove", name])
     return json.dumps({"ok": True, "removed": name,
                        "library": _resolve(library) or "(default)"},
                       ensure_ascii=False)

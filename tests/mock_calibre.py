@@ -189,9 +189,9 @@ def make_handler(state):
                 state.db[lib][nid] = _book(nid, m.group(3), ["EPUB"])
                 state.seen.append(("ADD", lib, nid, len(raw)))
                 return self._send(200, {"book_id": nid, "title": m.group(3)})
-            m = re.match(r"^/cdb/cmd/saved_searches(?:/(.+))?$", p)
+            m = re.match(r"^/cdb/cmd/saved_searches$", p)
             if m:
-                lib = m.group(1) if m.group(1) in LIBS else DEFAULT
+                lib, _q = _query_lib(self.path)
                 argv = json.loads(raw) if raw else ["list"]
                 action = argv[0]
                 if action == "list":
