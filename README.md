@@ -196,7 +196,7 @@ look right, set it to `0` and re-run `docker compose up -d`.
 
 The container speaks **streamable-http** on `http://127.0.0.1:8765/mcp`.
 
-### Claude Code / Cowork
+### Claude Code (running on the same machine)
 
 ```bash
 claude mcp add --transport http calibre http://127.0.0.1:8765/mcp
@@ -221,6 +221,48 @@ claude mcp list
 
 Restart Claude Desktop afterwards. Older builds only speak stdio — use the
 variant below if the server does not appear.
+
+### Claude running in the cloud (Cowork tasks, claude.ai)
+
+A Cowork task does **not** run on your machine. It runs in a sandbox in
+Anthropic's cloud and reaches your computer only through the desktop app's
+folder bridge. That bridge gives the session a shell, but the shell has no
+network interface at all:
+
+```bash
+ip addr        # inside the bridge
+# 1: lo: <LOOPBACK,UP> ... inet 127.0.0.1/8 scope host lo
+```
+
+Loopback and nothing else. So `http://127.0.0.1:8765/mcp` is unreachable
+from a cloud session twice over: the cloud sandbox's `127.0.0.1` is its own,
+and the bridge cannot route anywhere. Adding the URL to the cloud session
+directly will never work, and neither will `host.docker.internal` or your
+LAN address.
+
+**What does work: let Claude Desktop proxy it.** The desktop app forwards
+its own MCP servers into the cloud session, where they appear with a
+`mcp__remote-devices__` prefix — `calibre` becomes
+`mcp__remote-devices__calibre__search_books` and so on.
+
+1. Add the server to Claude Desktop (section above) and restart it.
+2. Keep the app open and online on the machine the task is linked to.
+3. Keep the container running (`docker compose up -d`).
+4. In the task, have Claude refresh its MCP tool list.
+
+If the tools still do not appear, the task is linked to a different computer
+than the one running the app — relink it from the desktop app on the right
+machine.
+
+**Fallback that needs none of this.** Run a script locally and paste the
+output into the conversation:
+
+```bash
+python3 scripts/reading_list.py --tag maturita
+```
+
+The cloud session can read and write files in your connected folders, so it
+can edit the repo and its documents; only the live library is out of reach.
 
 ### Any client, via stdio
 
@@ -484,6 +526,7 @@ under the special `added_formats` key, the file passed as a base64 data URL.
 | `Server did not return JSON` | `CALIBRE_URL` points at something else |
 | empty results | wrong `CALIBRE_LIBRARY_ID`; check `list_libraries` |
 | tools missing in the client | client restarted? absolute paths? |
+| tools missing in a Cowork task | a cloud session cannot reach `127.0.0.1` — proxy it through Claude Desktop |
 
 Quick check that bypasses MCP entirely:
 
