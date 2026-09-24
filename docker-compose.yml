@@ -1,0 +1,46 @@
+services:
+  calibre-mcp:
+    build: .
+    image: ghcr.io/opentreecz/calibre-mcp:${CALIBRE_MCP_VERSION:-latest}
+    container_name: calibre-mcp
+    restart: unless-stopped
+
+    environment:
+      # --- Calibre Content Server ---------------------------------------
+      # host.docker.internal = the host machine (see extra_hosts below).
+      # If calibre runs elsewhere, put its address here directly.
+      CALIBRE_URL: "http://host.docker.internal:8080"
+      # Default library; every tool can override it with `library`.
+      CALIBRE_LIBRARY_ID: "Calibre_Library"
+      # Credentials come from .env (see .env.example), not from here,
+      # so the password stays out of git.
+      CALIBRE_USER: "${CALIBRE_USER:-}"
+      CALIBRE_PASSWORD: "${CALIBRE_PASSWORD:-}"
+      CALIBRE_AUTH: "${CALIBRE_AUTH:-digest}"   # digest | basic | none
+
+      # Writing is toggled in .env. Default 1 = read-only.
+      CALIBRE_READONLY: "${CALIBRE_READONLY:-1}"
+
+      CALIBRE_TIMEOUT: "120"
+
+      # --- MCP transport -------------------------------------------------
+      # stdio makes no sense here: the MCP client has to spawn the process.
+      MCP_TRANSPORT: "streamable-http"
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8765"
+      MCP_PATH: "/mcp"
+
+    ports:
+      - "127.0.0.1:8765:8765"   # localhost only; not exposed to the network
+
+    # Lets the container reach calibre running on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # Linux fallback if host-gateway does not work: comment out ports and
+    # extra_hosts above and uncomment this. Then use
+    # CALIBRE_URL=http://localhost:8080 and MCP listens on the host directly.
+    # network_mode: host
+
+    security_opt:
+      - no-new-privileges:true
