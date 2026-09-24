@@ -6,25 +6,6 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import mock_calibre  # noqa: E402
-
-
-@pytest.fixture()
-def srv(monkeypatch):
-    url, state, stop = mock_calibre.start()
-    monkeypatch.setenv("CALIBRE_URL", url)
-    monkeypatch.delenv("CALIBRE_LIBRARY_ID", raising=False)
-
-    sys.modules.pop("calibre_mcp", None)
-    import calibre_mcp
-    calibre_mcp._session = None
-    calibre_mcp._lib_cache = None
-    calibre_mcp.BASE = url
-    calibre_mcp.LIB = ""
-    calibre_mcp.READONLY = False
-
-    yield calibre_mcp, state
-    stop()
 
 
 # ------------------------------------------------------------ libraries

@@ -29,6 +29,7 @@ while i < len(args):
     else:
         raise SystemExit("unknown argument: %s" % args[i])
 SESSION = None
+PROTOCOL = None
 _id = 0
 
 
@@ -45,6 +46,7 @@ def rpc(method, params=None, notify=False):
         URL, data=json.dumps(body).encode(), method="POST",
         headers={"Content-Type": "application/json",
                  "Accept": "application/json, text/event-stream",
+                 **({"MCP-Protocol-Version": PROTOCOL} if PROTOCOL else {}),
                  **({"mcp-session-id": SESSION} if SESSION else {})})
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
@@ -56,6 +58,11 @@ def rpc(method, params=None, notify=False):
         raise SystemExit("Cannot reach %s: %s" % (URL, e.reason))
     if notify:
         return None
+    if raw.lstrip().startswith("{"):
+        msg = json.loads(raw)
+        if "error" in msg:
+            raise SystemExit("MCP error: %s" % msg["error"])
+        return msg.get("result")
     # the body is SSE: "event: message\ndata: {...}"
     for line in raw.splitlines():
         if line.startswith("data:"):
@@ -69,8 +76,8 @@ def rpc(method, params=None, notify=False):
 def call(tool, **args):
     res = rpc("tools/call", {"name": tool, "arguments": args})
     if res.get("isError"):
-        return "TOOL ERROR: " + "".join(
-            c.get("text", "") for c in res.get("content", []))
+        raise SystemExit("TOOL ERROR: " + "".join(
+            c.get("text", "") for c in res.get("content", [])))
     return "".join(c.get("text", "") for c in res.get("content", []))
 
 
@@ -81,6 +88,7 @@ def head(t):
 info = rpc("initialize", {
     "protocolVersion": "2025-06-18", "capabilities": {},
     "clientInfo": {"name": "smoke", "version": "1"}})
+PROTOCOL = info["protocolVersion"]
 rpc("notifications/initialized", notify=True)
 print("connected to:", info["serverInfo"]["name"],
       "| protocol:", info["protocolVersion"], "| session:", (SESSION or "-")[:8])
@@ -130,3 +138,5 @@ print(bid, after.get("title"), "->", after.get("formats"))
 gained = set(map(str.lower, after.get("formats") or [])) - set(
     map(str.lower, before.get("formats") or []))
 print("\ngained:", sorted(gained) or "NOTHING - something went wrong")
+if fmt.lower().lstrip(".") not in set(map(str.lower, after.get("formats") or [])):
+    raise SystemExit("Conversion did not produce the requested format")

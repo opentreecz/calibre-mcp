@@ -50,16 +50,13 @@ import re
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import requests
 from requests.auth import HTTPBasicAuth, HTTPDigestAuth
 
-# mcp 1.x had FastMCP; 2.x renamed it to MCPServer. Support both.
-try:
-    from mcp.server.fastmcp import FastMCP as _MCPServer  # mcp < 2
-except ModuleNotFoundError:  # pragma: no cover
-    from mcp.server.mcpserver import MCPServer as _MCPServer  # mcp >= 2
+from mcp.server.fastmcp import FastMCP as _MCPServer
+from mcp.server.fastmcp.exceptions import ToolError as _ToolError
 
 BASE = os.environ.get("CALIBRE_URL", "").strip().rstrip("/")
 LIB = os.environ.get("CALIBRE_LIBRARY_ID", "").strip()
@@ -75,13 +72,6 @@ mcp = _MCPServer("calibre-api")
 # The SDK only forwards the message of an *anticipated* failure, i.e. a
 # ToolError. An ordinary exception is masked as "Error executing tool
 # <name>" and the reason never reaches the caller, so derive from ToolError.
-try:
-    from mcp.server.mcpserver.exceptions import ToolError as _ToolError  # mcp >= 2
-except ModuleNotFoundError:  # pragma: no cover
-    try:
-        from mcp.server.fastmcp.exceptions import ToolError as _ToolError  # mcp < 2
-    except ModuleNotFoundError:
-        _ToolError = RuntimeError
 
 
 class CalibreError(_ToolError):
@@ -257,7 +247,8 @@ def search_books(query: str = "", limit: int = 25, offset: int = 0,
 
     Set `library` to "all" to search every library at once."""
     if _is_all(library):
-        return search_all_libraries(query=query, limit_per_library=limit)
+        return search_all_libraries(query=query, limit_per_library=limit,
+                                    offset=offset, sort=sort, sort_order=sort_order)
     seg = _libseg(library)
     params = {"num": max(0, int(limit)), "offset": max(0, int(offset)),
               "sort": sort, "sort_order": sort_order}
@@ -267,15 +258,19 @@ def search_books(query: str = "", limit: int = 25, offset: int = 0,
     ids = res.get("book_ids") or []
     out = {"library": _resolve(library) or "(default)",
            "total": res.get("total_num"), "returned": len(ids), "books": []}
-    if ids:
+    for start in range(0, len(ids), 200):
+        chunk = ids[start:start + 200]
         meta = _json("GET", "/ajax/books" + seg,
-                     params={"ids": ",".join(str(i) for i in ids)})
-        out["books"] = [_slim(m) for m in meta.values() if m]
+                     params={"ids": ",".join(str(i) for i in chunk)})
+        out["books"].extend(_slim(meta[str(i)]) for i in chunk if meta.get(str(i)))
+    out["returned"] = len(out["books"])
     return json.dumps(out, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
-def search_all_libraries(query: str, limit_per_library: int = 10) -> str:
+def search_all_libraries(query: str, limit_per_library: int = 10,
+                         offset: int = 0, sort: str = "timestamp",
+                         sort_order: str = "desc") -> str:
     """Search every library on the server at once.
 
     Useful when you do not know which library a book is in."""
@@ -285,6 +280,7 @@ def search_all_libraries(query: str, limit_per_library: int = 10) -> str:
         try:
             res = json.loads(search_books(query=query,
                                           limit=limit_per_library,
+                                          offset=offset, sort=sort, sort_order=sort_order,
                                           library=lib_id))
             out[lib_id or "(default)"] = {"total": res.get("total"),
                                           "books": res.get("books")}
@@ -395,9 +391,11 @@ def _pick_format(book_id: int, fmt: str, library: str = "") -> str:
 
 def _filename_from(resp, fallback: str) -> str:
     cd = resp.headers.get("Content-Disposition", "")
-    m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', cd)
-    name = m.group(1) if m else fallback
-    return Path(name).name or fallback
+    extended = re.search(r"filename\*=UTF-8''([^;]+)", cd, re.I)
+    plain = re.search(r'filename="?([^";]+)"?', cd, re.I)
+    name = unquote(extended.group(1)) if extended else plain.group(1) if plain else fallback
+    name = Path(name.replace("\\", "/")).name
+    return name if name not in ("", ".", "..") else fallback
 
 
 # ----------------------------------------------------------------- editing
@@ -498,10 +496,15 @@ def copy_to_library(book_ids: list, target_library: str,
     _guard_write()
     if not book_ids:
         raise CalibreError("No books given.")
+    if not target_library.strip():
+        raise CalibreError("A target library is required.")
     target = _resolve(target_library)
     if not target:
         raise CalibreError("A target library is required.")
-    if target == (_resolve(library) or ""):
+    source = _resolve(library)
+    if not source:
+        source = _json("GET", "/ajax/library-info").get("default_library")
+    if target == source:
         raise CalibreError("Source and target are the same library.")
     body = {"book_ids": [int(b) for b in book_ids], "move": bool(move),
             "preserve_date": True, "duplicate_action": "add",
@@ -663,6 +666,7 @@ def conversion_job_status(job_id: int, abort: bool = False,
     """Poll a job started with `wait=False`, or abort it with `abort=True`."""
     params = _libq(library)
     if abort:
+        _guard_write()
         params["abort_job"] = "1"
     st = _json("GET", "/conversion/status/%d" % int(job_id), params=params)
     return json.dumps(st, ensure_ascii=False, indent=2)
@@ -681,17 +685,10 @@ def main() -> None:
     host = os.environ.get("MCP_HOST", "0.0.0.0")
     port = int(os.environ.get("MCP_PORT", "8765"))
     path = os.environ.get("MCP_PATH", "/mcp")
-    try:
-        mcp.run(transport=transport, host=host, port=port,
-                streamable_http_path=path)
-    except TypeError:
-        # mcp 1.x reads host/port from the instance, not from run()
-        for attr, val in (("host", host), ("port", port)):
-            try:
-                setattr(mcp.settings, attr, val)
-            except Exception:
-                pass
-        mcp.run(transport=transport)
+    mcp.settings.host = host
+    mcp.settings.port = port
+    mcp.settings.streamable_http_path = path
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

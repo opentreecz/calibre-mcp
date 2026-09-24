@@ -1,0 +1,68 @@
+name: Docker
+on:
+  pull_request:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+      version:
+        type: string
+        default: ''
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build local test image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          load: true
+          tags: calibre-mcp:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Test container through MCP
+        run: |
+          docker run --rm --entrypoint python3 calibre-mcp:test --version
+          docker run --rm -v "$PWD/tests:/tests:ro" --entrypoint python3 calibre-mcp:test /tests/container_smoke.py
+      - name: Image tags
+        id: tags
+        env:
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}"
+          {
+            echo 'tags<<EOF'
+            echo "$image:sha-$GITHUB_SHA"
+            if [ -n "$VERSION" ]; then
+              echo "$image:${VERSION#v}"
+              echo "$image:latest"
+            fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: inputs.publish
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Multi-platform image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ inputs.publish || false }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -13,3 +13,7 @@ build/
 .idea/
 .vscode/
 *.swp
+.coverage
+coverage.xml
+test-results.xml
+.ruff_cache/

@@ -1,7 +1,7 @@
 services:
   calibre-mcp:
     build: .
-    image: calibre-mcp:latest
+    image: ghcr.io/opentreecz/calibre-mcp:${CALIBRE_MCP_VERSION:-latest}
     container_name: calibre-mcp
     restart: unless-stopped
 

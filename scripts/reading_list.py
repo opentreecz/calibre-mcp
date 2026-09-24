@@ -95,11 +95,12 @@ while i < len(args):
         raise SystemExit("unknown argument: %s" % args[i])
 
 SESSION = None
+PROTOCOL = None
 _id = 0
 
 
 def rpc(method, params=None, notify=False):
-    global SESSION, _id
+    global SESSION, PROTOCOL, _id
     body = {"jsonrpc": "2.0", "method": method}
     if params is not None:
         body["params"] = params
@@ -110,6 +111,7 @@ def rpc(method, params=None, notify=False):
         URL, data=json.dumps(body).encode(), method="POST",
         headers={"Content-Type": "application/json",
                  "Accept": "application/json, text/event-stream",
+                 **({"MCP-Protocol-Version": PROTOCOL} if PROTOCOL else {}),
                  **({"mcp-session-id": SESSION} if SESSION else {})})
     try:
         with urllib.request.urlopen(req, timeout=180) as r:
@@ -119,11 +121,20 @@ def rpc(method, params=None, notify=False):
         raise SystemExit("Cannot reach %s: %s" % (URL, e))
     if notify:
         return None
+    if raw.lstrip().startswith("{"):
+        msg = json.loads(raw)
+        if "error" in msg:
+            raise SystemExit("MCP error: %s" % msg["error"])
+        if method == "initialize":
+            PROTOCOL = msg["result"]["protocolVersion"]
+        return msg.get("result")
     for line in raw.splitlines():
         if line.startswith("data:"):
             msg = json.loads(line[5:].strip())
             if "error" in msg:
                 raise SystemExit("MCP error: %s" % msg["error"])
+            if method == "initialize":
+                PROTOCOL = msg["result"]["protocolVersion"]
             return msg.get("result")
     raise SystemExit("Unexpected response: " + raw[:300])
 
@@ -193,7 +204,10 @@ def pair_by_author(missing, stray):
     for num, title, author, others in missing:
         a = fold(author).strip()
         cands = [b for b in stray if a in fold(" ".join(b.get("authors") or []))]
-        if len(cands) == 1:
+        competing = [entry for entry in missing
+                     if cands and fold(entry[2]).strip() in
+                     fold(" ".join(cands[0].get("authors") or []))]
+        if len(cands) == 1 and len(competing) == 1:
             paired.append((num, title, cands[0]))
             stray.remove(cands[0])
         else:

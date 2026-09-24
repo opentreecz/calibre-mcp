@@ -1,3 +1,3 @@
-# Funguje s mcp 1.x i 2.x (import se prepina za behu).
-mcp>=1.2.0
-requests>=2.31.0
+# Supported SDK API; major upgrades require transport integration testing.
+mcp>=1.26.0,<2
+requests>=2.32.4,<3

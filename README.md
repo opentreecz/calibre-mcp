@@ -4,6 +4,9 @@ An MCP server that drives a running **calibre Content Server** over its HTTP
 API: search a library, edit metadata, and convert books to other formats —
 from Claude or any other MCP client.
 
+**Start here:** [Claude Desktop tutorial](docs/claude-desktop.md) ·
+[Development and releases](docs/development.md) · [Český návod](docs/navod-cs.md)
+
 It does not touch `metadata.db` and does not drive `calibredb` against the
 library folder, so the calibre GUI can stay open and the library can live on
 another machine entirely.
@@ -74,7 +77,8 @@ display names.
 ## Requirements
 
 - A running calibre Content Server with an account that may write
-- Docker, or Python 3.10+ to run it directly
+- Docker (the image uses Python 3.14), or Python 3.10+ to run it directly;
+  Python 3.14 is recommended for new installations
 
 Nothing else. No local calibre, no `ebook-convert`.
 
@@ -113,7 +117,7 @@ After=network.target
 
 [Service]
 ExecStart=/usr/bin/calibre-server --port 8080 --listen-on 0.0.0.0 \
-          --enable-auth %h/Calibre Library
+          --enable-auth "%h/Calibre Library"
 Restart=on-failure
 
 [Install]
@@ -145,7 +149,7 @@ services:
   calibre-mcp:
     build: .
     environment:
-      CALIBRE_URL: "http://calibre:8080"   # service name, not an IP
+      CALIBRE_URL: "http://calibre:8081"   # container port, not the published host port
       CALIBRE_LIBRARY_ID: "Calibre_Library"
       CALIBRE_USER: "${CALIBRE_USER}"
       CALIBRE_PASSWORD: "${CALIBRE_PASSWORD}"
@@ -176,13 +180,18 @@ cd calibre-mcp
 cp .env.example .env        # fill in CALIBRE_USER and CALIBRE_PASSWORD
 $EDITOR .env
 
-docker compose build
-docker compose up -d
+docker compose pull
+docker compose up -d --no-build
 docker compose logs -f
 ```
 
-The image is Debian stable (bookworm) with Python 3.12, runs as a non-root
+The image is Debian trixie with Python 3.14, runs as a non-root
 user, and contains no calibre.
+
+Compose uses `ghcr.io/opentreecz/calibre-mcp:latest`. Set
+`CALIBRE_MCP_VERSION=0.1.0` in `.env` to pin a release. To build the checkout
+instead, run `docker compose up -d --build`. Configure the calibre URL and
+library in `docker-compose.yml` for your installation.
 
 Credentials live in `.env`, which is gitignored — `docker-compose.yml` only
 interpolates them, so no password ends up in the repository.
@@ -205,64 +214,19 @@ claude mcp list
 
 ### Claude Desktop
 
-`~/.config/Claude/claude_desktop_config.json` on Linux,
-`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS:
-
-```json
-{
-  "mcpServers": {
-    "calibre": {
-      "type": "streamable-http",
-      "url": "http://127.0.0.1:8765/mcp"
-    }
-  }
-}
-```
-
-Restart Claude Desktop afterwards. Older builds only speak stdio — use the
-variant below if the server does not appear.
+Follow the [step-by-step Claude Desktop tutorial](docs/claude-desktop.md).
+It covers macOS and Windows, credentials, Docker networking, configuration,
+example prompts, file mounts, and troubleshooting. The supported local setup
+uses `command`/`args` to launch Docker over stdio, as shown below.
 
 ### Claude running in the cloud (Cowork tasks, claude.ai)
 
-A Cowork task does **not** run on your machine. It runs in a sandbox in
-Anthropic's cloud and reaches your computer only through the desktop app's
-folder bridge. That bridge gives the session a shell, but the shell has no
-network interface at all:
-
-```bash
-ip addr        # inside the bridge
-# 1: lo: <LOOPBACK,UP> ... inet 127.0.0.1/8 scope host lo
-```
-
-Loopback and nothing else. So `http://127.0.0.1:8765/mcp` is unreachable
-from a cloud session twice over: the cloud sandbox's `127.0.0.1` is its own,
-and the bridge cannot route anywhere. Adding the URL to the cloud session
-directly will never work, and neither will `host.docker.internal` or your
-LAN address.
-
-**What does work: let Claude Desktop proxy it.** The desktop app forwards
-its own MCP servers into the cloud session, where they appear with a
-`mcp__remote-devices__` prefix — `calibre` becomes
-`mcp__remote-devices__calibre__search_books` and so on.
-
-1. Add the server to Claude Desktop (section above) and restart it.
-2. Keep the app open and online on the machine the task is linked to.
-3. Keep the container running (`docker compose up -d`).
-4. In the task, have Claude refresh its MCP tool list.
-
-If the tools still do not appear, the task is linked to a different computer
-than the one running the app — relink it from the desktop app on the right
-machine.
-
-**Fallback that needs none of this.** Run a script locally and paste the
-output into the conversation:
-
-```bash
-python3 scripts/reading_list.py --tag maturita
-```
-
-The cloud session can read and write files in your connected folders, so it
-can edit the repo and its documents; only the live library is out of reach.
+Local Desktop MCP configuration does not guarantee access from cloud sessions.
+Remote connectors have separate setup and account requirements and must reach
+the server over the network. `127.0.0.1` and `host.docker.internal` are local
+addresses, not cloud endpoints. See the tutorial's HTTP section and the
+[official remote connector guide](https://modelcontextprotocol.io/docs/develop/connect-remote-servers).
+For a local report you can share manually, run `python3 scripts/reading_list.py`.
 
 ### Any client, via stdio
 
@@ -280,16 +244,15 @@ one per session and it exits with the client.
         "-e", "MCP_TRANSPORT=stdio",
         "-e", "CALIBRE_URL=http://host.docker.internal:8080",
         "-e", "CALIBRE_LIBRARY_ID=Calibre_Library",
-        "-e", "CALIBRE_USER=yourname",
-        "-e", "CALIBRE_PASSWORD=yourpassword",
-        "calibre-mcp:latest"
+        "--env-file", "/absolute/path/calibre-mcp.env",
+        "ghcr.io/opentreecz/calibre-mcp:latest"
       ]
     }
   }
 }
 ```
 
-Build the image once with `docker compose build`; you do not need
+Pull the image once with `docker pull ghcr.io/opentreecz/calibre-mcp:latest`; you do not need
 `docker compose up` for this mode.
 
 ### Without Docker
@@ -478,11 +441,19 @@ Behind a reverse proxy calibre is usually switched to basic auth
 ## Tests
 
 ```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m ruff check .
 .venv/bin/python -m pytest tests/ -v
 ```
 
 `tests/` contains a mock Content Server with two libraries covering every
-endpoint used, including the conversion job lifecycle. 22 tests.
+endpoint used, including the conversion job lifecycle. Integration tests launch
+the real MCP server over stdio and HTTP against that mock.
+
+CI checks Python 3.10 and 3.14 with the minimum and latest supported MCP 1.x
+SDK. Docker builds target amd64 and arm64. See
+[Development and releases](docs/development.md) for workflow and release details.
 
 The mock checks client logic — URL construction, JSON shapes, base64
 encoding, library routing. It is not a substitute for a real server: back up
@@ -526,7 +497,7 @@ under the special `added_formats` key, the file passed as a base64 data URL.
 | `Server did not return JSON` | `CALIBRE_URL` points at something else |
 | empty results | wrong `CALIBRE_LIBRARY_ID`; check `list_libraries` |
 | tools missing in the client | client restarted? absolute paths? |
-| tools missing in a Cowork task | a cloud session cannot reach `127.0.0.1` — proxy it through Claude Desktop |
+| tools missing in a cloud session | local Desktop tools and remote connectors have separate availability and setup |
 
 Quick check that bypasses MCP entirely:
 

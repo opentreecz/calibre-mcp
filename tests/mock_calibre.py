@@ -136,8 +136,16 @@ def make_handler(state):
                                         "default_library": DEFAULT})
             if p.startswith("/ajax/search"):
                 lib = _lib_after(p, "/ajax/search")
+                _, q = _query_lib(self.path)
                 ids = list(state.db[lib])
-                return self._send(200, {"book_ids": ids, "total_num": len(ids)})
+                total = len(ids)
+                sort = q.get("sort", ["timestamp"])[0]
+                ids.sort(key=lambda i: state.db[lib][i].get(sort) or i,
+                         reverse=q.get("sort_order", ["desc"])[0] == "desc")
+                offset = int(q.get("offset", [0])[0])
+                num = int(q.get("num", [total])[0])
+                return self._send(200, {"book_ids": ids[offset:offset + num],
+                                        "total_num": total})
             if p.startswith("/ajax/books"):
                 lib = _lib_after(p, "/ajax/books")
                 m = re.search(r"ids=([\d%2C,]+)", self.path)
@@ -193,15 +201,16 @@ def make_handler(state):
             if m:
                 lib, _q = _query_lib(self.path)
                 argv = json.loads(raw) if raw else ["list"]
+                saved = state.saved.setdefault(lib, {})
                 action = argv[0]
                 if action == "list":
-                    self._send(200, dict(state.saved))
+                    self._send(200, dict(saved))
                 elif action == "add":
-                    state.saved[argv[1]] = argv[2]
+                    saved[argv[1]] = argv[2]
                     state.seen.append(("SS_ADD", lib, argv[1], argv[2]))
                     self._send(200, None)
                 elif action == "remove":
-                    state.saved.pop(argv[1], None)
+                    saved.pop(argv[1], None)
                     state.seen.append(("SS_REMOVE", lib, argv[1]))
                     self._send(200, None)
                 else:
@@ -227,4 +236,8 @@ def start(port=0):
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
     url = "http://127.0.0.1:%d" % srv.server_address[1]
-    return url, state, srv.shutdown
+    def stop():
+        srv.shutdown()
+        srv.server_close()
+        t.join()
+    return url, state, stop

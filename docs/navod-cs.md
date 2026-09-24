@@ -34,13 +34,18 @@ názvy.
 
 ```bash
 cp .env.example .env     # doplnit CALIBRE_USER a CALIBRE_PASSWORD
-docker compose build
-docker compose up -d
+docker compose pull
+docker compose up -d --no-build
 python3 scripts/smoke.py
 ```
 
 V `.env` je na začátku `CALIBRE_READONLY=1`. Až ověříte čtení, přepněte
 na `0` a pusťte `docker compose up -d` znovu.
+
+Image `ghcr.io/opentreecz/calibre-mcp:latest` používá Python 3.14.
+Pro konkrétní verzi nastavte v `.env` například `CALIBRE_MCP_VERSION=0.1.0`.
+Lokální sestavení: `docker compose up -d --build`. Adresu Calibre a ID knihovny
+upravte v `docker-compose.yml`.
 
 ## Napojení na Claude
 
@@ -48,8 +53,23 @@ na `0` a pusťte `docker compose up -d` znovu.
 claude mcp add --transport http calibre http://127.0.0.1:8765/mcp
 ```
 
-Pro Claude Desktop a další varianty (včetně stdio přes `docker run`) viz
-[README](../README.md#adding-it-to-claude).
+Příkaz výše je pro **Claude Code**, nikoli Desktop.
+
+### Claude Desktop (macOS a Windows)
+
+1. Spusťte Docker Desktop a stáhněte image příkazem
+   `docker pull ghcr.io/opentreecz/calibre-mcp:latest`.
+2. Vytvořte soubor s přihlašovacími údaji a `CALIBRE_READONLY=1`.
+3. V Claude otevřete **Settings → Developer → Edit Config**.
+4. Přidejte server s `command: "docker"` a argumenty `run --rm -i`,
+   `--env-file` s absolutní cestou, `-e MCP_TRANSPORT=stdio` a názvem image.
+5. Claude úplně ukončete a znovu spusťte. Požádejte o seznam knihoven.
+
+Kompletní JSON, cesty pro oba systémy a řešení chyb najdete v
+[podrobném návodu pro Claude Desktop](claude-desktop.md).
+Desktop kontejner spouští sám; `docker compose up` pro tuto variantu není třeba.
+Pro zápis změňte `CALIBRE_READONLY=0` a restartujte Desktop.
+HTTP konfigurace `type`/`url` nepatří do lokálního Desktop JSON.
 
 ## Víc knihoven najednou
 
