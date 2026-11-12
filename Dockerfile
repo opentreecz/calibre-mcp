@@ -1,7 +1,7 @@
 # Debian trixie + Python 3.14.
 # No calibre inside: conversion runs on the Content Server itself
 # (the /conversion/* endpoints); this container only talks HTTP to it.
-FROM python:3.14-slim-trixie
+FROM python:3.15-slim-trixie
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
